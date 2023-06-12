@@ -81,8 +81,9 @@ class MediaLoader(object):
 if __name__ == "__main__":
     import sys
 
-    #s = sys.argv[1]
-    medialoader = MediaLoader("rtsp://210.99.70.120:1935/live/cctv001.stream")
+    s = sys.argv[1]      # video file, webcam, rtsp stream.. etc
+
+    medialoader = MediaLoader()
     time.sleep(1)
     _frame = medialoader.get_frame()
     print(_frame.shape, _frame.dtype)
