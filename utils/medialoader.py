@@ -82,7 +82,7 @@ if __name__ == "__main__":
     import sys
 
     #s = sys.argv[1]
-    medialoader = MediaLoader("C:\\Users\\sdy10\\Videos\\sample.mp4")
+    medialoader = MediaLoader("rtsp://210.99.70.120:1935/live/cctv001.stream")
     time.sleep(1)
     _frame = medialoader.get_frame()
     print(_frame.shape, _frame.dtype)
