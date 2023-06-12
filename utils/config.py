@@ -6,6 +6,8 @@ from yacs.config import CfgNode as CN
 _C = CN()
 
 _C.IMG_SIZE = 640
+_C.DET_MODEL = ""
+_C.POSE_MODEL = ""
 
 
 def update_config(cfg, args):
@@ -14,8 +16,8 @@ def update_config(cfg, args):
         return
 
     cfg.defrost()
-    cfg.merge_from_file(args.cfg)
-    cfg.merge_from_list(args.opts)
+    cfg.merge_from_file(args)
+    # cfg.merge_from_list(args.opts)
 
     cfg.freeze()
 
