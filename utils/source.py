@@ -115,3 +115,24 @@ class YoloLoadStreams:
                     self.imgs = np.zeros_like(self.imgs)
                     cap.open(stream)
             time.sleep(0.0)
+
+    def __iter__(self):
+        self.count = -1
+        return self
+
+    def __next__(self):
+        self.count += 1
+        if not self.threads.is_alive() or cv2.waitKey(1) == ord('q'):
+            cv2.destroyAllWindows()
+            raise StopIteration
+
+        im0 = self.imgs.copy()
+
+        if self.transforms:
+            im = np.stack([self.transforms(x) for x in im0])  # transforms
+        else:
+            im = np.stack([letterbox(im0, self.img_size, stride=self.stride, auto=self.auto)[0]])  # resize
+            im = im[..., ::-1].transpose((0, 3, 1, 2))  # BGR to RGB, BHWC to BCHW
+            im = np.ascontiguousarray(im)  # contiguous
+
+        return self.sources, im, im0, None, ''
