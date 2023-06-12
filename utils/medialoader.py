@@ -22,7 +22,7 @@ class MediaLoader(object):
         self.stride = stride
         self.is_file, self.is_url, self.is_webcam = check_sources(source)
 
-        source = Path(source).read_text().rsplit() if os.path.isfile(source) else source
+        source = os.path.abspath(source) if os.path.isfile(source) else source
         self.source = str(source)
         self.img, self.fps, self.frame, self.thread = None, 0, 0, None
 
@@ -69,7 +69,9 @@ class MediaLoader(object):
     def show_frame(self, wait_sec:int=0):
         frame = self.get_frame()
         cv2.imshow("frame", frame)
-        cv2.waitKey(wait_sec)
+
+        if cv2.waitKey(wait_sec) == ord('q'):
+            raise StopIteration
 
     def __del__(self):
         self.cap.release()
@@ -79,10 +81,10 @@ class MediaLoader(object):
 if __name__ == "__main__":
     import sys
 
-    s = sys.argv[1]
-    medialoader = MediaLoader(s)
+    #s = sys.argv[1]
+    medialoader = MediaLoader("C:\\Users\\sdy10\\Videos\\sample.mp4")
     time.sleep(1)
     _frame = medialoader.get_frame()
     print(_frame.shape, _frame.dtype)
-
-    medialoader.show_frame(0)
+    while True:
+        medialoader.show_frame(0)
