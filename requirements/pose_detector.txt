@@ -1,0 +1,7 @@
+yacs==0.1.8
+tqdm==4.65.0
+psutil
+requests>=2.23.0
+scipy==1.9.3
+pandas>=1.1.4
+opencv-python==4.7.0.72
