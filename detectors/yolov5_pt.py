@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from models.yolo import check_img_size, letterbox, non_max_suppression
+from models.yolo import check_img_size, letterbox, non_max_suppression, scale_boxes
 
 class YoloDetector(nn.Module):
     def __init__(self, weight='yolov5s.pt', device=torch.device('cpu'), img_size=640, fp16=False, auto=True, fuse=True):
@@ -13,15 +13,12 @@ class YoloDetector(nn.Module):
         self.cuda = torch.cuda.is_available() and device
         self.fp16 = fp16
         model = attempt_load(weight, device=device, inplace=True, fuse=fuse)
-        self.stride = max(int(model.stride.max()), 32)
-
-        self.img_size = check_img_size(img_size, s=self.stride)
-
-        self.names = model.module.names if hasattr(model, 'module') else model.names  # get class names
         model.half() if fp16 else model.float()
         self.model = model
-
-        self.auto = False
+        self.stride = max(int(model.stride.max()), 32)
+        self.img_size = check_img_size(img_size, s=self.stride)
+        self.names = model.module.names if hasattr(model, 'module') else model.names  # get class names
+        self.auto = auto
 
     def warmup(self, imgsz=(1, 3, 640, 640)):
         im = torch.empty(*imgsz, dtype=torch.half if self.fp16 else torch.float, device=self.device)  # input
@@ -54,9 +51,11 @@ class YoloDetector(nn.Module):
             return self.from_numpy(y)
 
     def postprocess(self, pred, max_det=100):
-        pred = non_max_suppression(pred, classes=[0], max_det=max_det)
+        pred = non_max_suppression(pred, classes=[0], max_det=max_det)[0]
 
-        return pred
+        det = scale_boxes(im.shape[2:], pred[:, :4], im0.shape).round()
+
+        return pred, det
 
     def from_numpy(self, x):
         return torch.from_numpy(x).to(self.device) if isinstance(x, np.ndarray) else x
@@ -108,13 +107,18 @@ def attempt_load(weight, device=None, inplace=True, fuse=True):
 if __name__ == "__main__":
     model = YoloDetector(weight='../weights/yolov5n.pt', device='cpu', img_size=640)
     model.warmup()
-    # print(dir(model), type(model))
 
     import cv2
-
-    img = cv2.imread('../zidane.jpg')
+    img = cv2.imread('../army.jpg')
     im, im0 = model.preprocess(img)
 
     pred = model.forward(im)
-    pred = model.postprocess(pred)
+    pred, det = model.postprocess(pred)
     print(pred)
+    print(det)
+    for d in det:
+        x1, y1, x2, y2 = map(int, d)
+        cv2.rectangle(im0, (x1, y1), (x2, y2), (128, 128, 128), thickness=2, lineType=cv2.LINE_AA)
+
+    cv2.imshow('_', im0)
+    cv2.waitKey(0)
