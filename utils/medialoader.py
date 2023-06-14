@@ -39,13 +39,15 @@ class MediaLoader(object):
         self.frame = max(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), 0) or float('inf')
 
         _, self.imgs = cap.read()
-        self.thread = Thread(target=self.update, args=([cap, source]), daemon=True)
+
+        wait_ms = 1 / self.fps
+        self.thread = Thread(target=self.update, args=([cap, source, wait_ms]), daemon=True)
         print(f"-- Success ({self.frame} frames {self.w}x{self.h} at {self.fps:.2f} FPS)")
         self.alive = True
         self.thread.start()
 
 
-    def update(self, cap, stream):
+    def update(self, cap, stream, wait_ms=0.01):
         n, f = 0, self.frame
         while cap.isOpened() and n < f and self.alive:
             n += 1
@@ -57,20 +59,18 @@ class MediaLoader(object):
                 else:
                     self.img = np.zeros_like(self.img)
                     cap.open(stream)
-            time.sleep(0.0)
+            time.sleep(wait_ms)
 
     def is_frame_ready(self):
         return True if self.img is not None else False
 
     def get_frame(self):
         orig_im = self.img.copy()
-
         return orig_im
 
     def show_frame(self, wait_sec:int=0):
         frame = self.get_frame()
         cv2.imshow("frame", frame)
-
         if cv2.waitKey(wait_sec) == ord('q'):
             raise StopIteration
 
@@ -93,4 +93,4 @@ if __name__ == "__main__":
     _frame = medialoader.get_frame()
     print(_frame.shape, _frame.dtype)
     while True:
-        medialoader.show_frame(0)
+        medialoader.show_frame(wait_sec=1)
