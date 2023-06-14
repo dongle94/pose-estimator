@@ -69,7 +69,7 @@ if __name__ == "__main__":
 
         for d in ret[1]:
             x1, y1, x2, y2 = map(int, d[:4])
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (128, 128, 128), thickness=2, lineType=cv2.LINE_AA)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (96, 96, 216), thickness=2, lineType=cv2.LINE_AA)
 
         cv2.imshow('_', frame)
         if cv2.waitKey(1) == ord('q'):
