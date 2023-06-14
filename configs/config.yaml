@@ -1,0 +1,12 @@
+# Environments
+DEVICE: 0
+
+
+# Object Detector
+DET_MODEL_TYPE: "yolo"
+DET_MODEL_PATH: './weights/yolov5n.pt'
+IMG_SIZE: 640
+HALF: false
+
+
+# Keypoint Detector

@@ -5,9 +5,19 @@ from yacs.config import CfgNode as CN
 
 _C = CN()
 
+# Envrionments
+_C.DEVICE = None
+
+# Object Detector
 _C.IMG_SIZE = 640
-_C.DET_MODEL = ""
+_C.DET_MODEL_TYPE = ""
+_C.DET_MODEL_PATH = ""
+_C.HALF = False
+
+
+# Keypoint Detector
 _C.POSE_MODEL = ""
+
 
 
 def update_config(cfg, args):
