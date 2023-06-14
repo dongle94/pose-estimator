@@ -41,12 +41,13 @@ class MediaLoader(object):
         _, self.imgs = cap.read()
         self.thread = Thread(target=self.update, args=([cap, source]), daemon=True)
         print(f"-- Success ({self.frame} frames {self.w}x{self.h} at {self.fps:.2f} FPS)")
+        self.alive = True
         self.thread.start()
 
 
     def update(self, cap, stream):
         n, f = 0, self.frame
-        while cap.isOpened() and n < f:
+        while cap.isOpened() and n < f and self.alive:
             n += 1
             cap.grab()
             if n % self.stride == 0:
@@ -73,6 +74,10 @@ class MediaLoader(object):
         if cv2.waitKey(wait_sec) == ord('q'):
             raise StopIteration
 
+    def stop(self):
+        self.alive = False
+        self.thread.join(timeout=1)
+
     def __del__(self):
         self.cap.release()
         cv2.destroyAllWindows()
@@ -83,7 +88,7 @@ if __name__ == "__main__":
 
     s = sys.argv[1]      # video file, webcam, rtsp stream.. etc
 
-    medialoader = MediaLoader()
+    medialoader = MediaLoader(s)
     time.sleep(1)
     _frame = medialoader.get_frame()
     print(_frame.shape, _frame.dtype)
