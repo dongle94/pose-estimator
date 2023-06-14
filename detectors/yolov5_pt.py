@@ -6,6 +6,15 @@ import torch.nn as nn
 
 from models.yolo import check_img_size, letterbox, non_max_suppression, scale_boxes
 
+import sys
+from pathlib import Path
+FILE = Path(__file__).resolve()
+ROOT = FILE.parents[1]  # YOLOv5 root directory
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))  # add ROOT to PATH
+os.chdir(ROOT)
+
+
 class YoloDetector(nn.Module):
     def __init__(self, weight='yolov5s.pt', device=torch.device('cpu'), img_size=640, fp16=False, auto=True, fuse=True):
         super().__init__()
@@ -106,11 +115,11 @@ def attempt_load(weight, device=None, inplace=True, fuse=True):
     return ckpt
 
 if __name__ == "__main__":
-    model = YoloDetector(weight='../weights/yolov5n.pt', device='cpu', img_size=640)
+    model = YoloDetector(weight='./weights/yolov5n.pt', device='cpu', img_size=640)
     model.warmup()
 
     import cv2
-    img = cv2.imread('../army.jpg')
+    img = cv2.imread('./data/images/army.jpg')
     im, im0 = model.preprocess(img)
 
     pred = model.forward(im)

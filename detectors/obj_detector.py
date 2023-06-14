@@ -7,10 +7,9 @@ FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
-
+os.chdir(ROOT)
 
 from detectors.yolov5_pt import YoloDetector
-
 
 class HumanDetector(object):
     def __init__(self, cfg=None):
@@ -55,7 +54,7 @@ if __name__ == "__main__":
     from utils.config import update_config
     from utils.medialoader import MediaLoader
 
-    update_config(cfg, args='../configs/config.yaml')
+    update_config(cfg, args='./configs/config.yaml')
     detector = HumanDetector(cfg=cfg)
 
     s = sys.argv[1]
