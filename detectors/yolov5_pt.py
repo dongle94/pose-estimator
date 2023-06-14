@@ -1,3 +1,4 @@
+import copy
 import os
 import numpy as np
 import torch
@@ -50,10 +51,10 @@ class YoloDetector(nn.Module):
         else:
             return self.from_numpy(y)
 
-    def postprocess(self, pred, max_det=100):
+    def postprocess(self, pred, im_shape, im0_shape, max_det=100):
         pred = non_max_suppression(pred, classes=[0], max_det=max_det)[0]
-
-        det = scale_boxes(im.shape[2:], pred[:, :4], im0.shape).round()
+        det = scale_boxes(im_shape[2:], copy.deepcopy(pred[:, :4]), im0_shape).round()
+        det = torch.cat([det, pred[:, 4:]], dim=1)
 
         return pred, det
 
@@ -113,11 +114,10 @@ if __name__ == "__main__":
     im, im0 = model.preprocess(img)
 
     pred = model.forward(im)
-    pred, det = model.postprocess(pred)
-    print(pred)
+    pred, det = model.postprocess(pred, im.shape, im0.shape)
     print(det)
     for d in det:
-        x1, y1, x2, y2 = map(int, d)
+        x1, y1, x2, y2 = map(int, d[:4])
         cv2.rectangle(im0, (x1, y1), (x2, y2), (128, 128, 128), thickness=2, lineType=cv2.LINE_AA)
 
     cv2.imshow('_', im0)
