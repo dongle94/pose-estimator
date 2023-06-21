@@ -16,7 +16,10 @@ _C.HALF = False
 
 
 # Keypoint Detector
-_C.POSE_MODEL = ""
+_C.KEPT_MODEL_TYPE = ""
+_C.KEPT_MODEL_PATH = ""
+_C.KEPT_HALF = False
+_C.KEPT_IMG_SIZE = [288, 384]
 
 
 
