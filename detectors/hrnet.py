@@ -62,7 +62,7 @@ class HRNet(nn.Module):
                 (int(self.img_size[0]), int(self.img_size[1])),
                 flags=cv2.INTER_LINEAR)
             # hwc -> 1chw
-            model_input = self.pose_transform(model_input).half()  # .unsqueeze(0)
+            model_input = self.pose_transform(model_input)  # .unsqueeze(0)
             model_inputs.append(model_input)
 
         # n * 1chw -> nchw
