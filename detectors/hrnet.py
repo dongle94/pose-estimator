@@ -79,17 +79,6 @@ class HRNet(nn.Module):
         return output
 
     def postprocess(self, preds, center, scale):
-        """
-        coords, conf = get_final_preds(
-        cfg,
-        output.cpu().detach().numpy(),
-        np.asarray(centers),
-        np.asarray(scales))
-        #print(coords, conf)
-        # print("@2-2", time.time() - st)
-        return np.concatenate((coords, conf), axis=2)
-        """
-
         batch_heatmaps = preds.cpu().detach().numpy()
         coords, maxvals = self.get_max_preds(batch_heatmaps)
         heatmap_height = batch_heatmaps.shape[2]
@@ -231,7 +220,6 @@ class HRNet(nn.Module):
         target_coords = np.zeros(coords.shape)
 
         trans = self.get_affine_transform(center, scale, 0, output_size, inv=1)
-        print(trans)
         for p in range(coords.shape[0]):
             target_coords[p, 0:2] = self.affine_transform(coords[p, 0:2], trans)
         return target_coords
@@ -276,6 +264,7 @@ class HRNet(nn.Module):
 
 if __name__ == "__main__":
     from detectors.yolov5_pt import YoloDetector
+    from utils.visualization import vis_pose_result
     detector = YoloDetector(weight='./weights/yolov5n.pt', device=0, img_size=640)
     detector.warmup()
 
@@ -291,12 +280,11 @@ if __name__ == "__main__":
     kept_inputs, centers, scales = keypointer.preprocess(input_img, det)
     kept_pred = keypointer.forward(kept_inputs)
     kept_pred = keypointer.postprocess(kept_pred, np.asarray(centers), np.asarray(scales))
-    print(kept_pred)
 
 
     for d in det:
         x1, y1, x2, y2 = map(int, d[:4])
         cv2.rectangle(im0, (x1, y1), (x2, y2), (128, 128, 240), thickness=2, lineType=cv2.LINE_AA)
-
+    im0 = vis_pose_result(model=None, img=im0, result=kept_pred)
     cv2.imshow('_', im0)
     cv2.waitKey(0)
