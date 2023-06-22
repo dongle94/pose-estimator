@@ -1,0 +1,91 @@
+import os
+import sys
+
+from pathlib import Path
+FILE = Path(__file__).resolve()
+ROOT = FILE.parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))  # add ROOT to PATH
+os.chdir(ROOT)
+
+from detectors.hrnet import HRNet
+
+class PoseDetector(object):
+    def __init__(self, cfg=None):
+        # Keypoint Detector model configuration
+        if os.path.abspath(cfg.KEPT_MODEL_PATH) != cfg.KEPT_MODEL_PATH:
+            weight = os.path.abspath(os.path.join(ROOT, cfg.KEPT_MODEL_PATH))
+        else:
+            weight = os.path.abspath(cfg.KEPT_MODEL_PATH)
+        device = cfg.DEVICE
+        fp16 = cfg.KEPT_HALF
+        img_size = cfg.KEPT_IMG_SIZE
+
+        # Model load with weight
+        self.detector = HRNet(weight=weight, device=device, img_size=img_size, fp16=fp16)
+
+        # warm up
+        self.detector.warmup(imgsz=(1, 3, img_size[0], img_size[1]))
+
+    def preprocess(self, img, boxes):
+        # boxes coords are ltrb
+        inp, centers, scales =  self.detector.preprocess(img, boxes)
+        return inp, centers, scales
+
+    def detect(self, inputs):
+        preds = self.detector.forward(inputs)
+
+        return preds
+
+    def postprocess(self, preds, centers, scales):
+        preds = self.detector.postprocess(preds, centers, scales)
+
+        return preds
+
+def test():
+    import time
+    import cv2
+    from detectors.obj_detector import HumanDetector
+    from utils.config import _C as cfg
+    from utils.config import update_config
+    from utils.medialoader import MediaLoader
+    from utils.visualization import vis_pose_result
+
+    update_config(cfg, args='./configs/config.yaml')
+    print(cfg)
+
+    obj_detector = HumanDetector(cfg=cfg)
+    kept_detector = PoseDetector(cfg=cfg)
+
+    s = sys.argv[1]
+    media_loader = MediaLoader(s)
+    time.sleep(1)
+    while True:
+        frame = media_loader.get_frame()
+
+        im = obj_detector.preprocess(frame)
+        pred = obj_detector.detect(im)
+        ret = obj_detector.postprocess(pred)
+
+        inps, centers, scales = kept_detector.preprocess(frame, ret[1])
+        preds = kept_detector.detect(inps)
+        rets = kept_detector.postprocess(preds, centers, scales)
+
+        for d in ret[1]:
+            x1, y1, x2, y2 = map(int, d[:4])
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (96, 96, 216), thickness=2, lineType=cv2.LINE_AA)
+        frame = vis_pose_result(model=None, img=frame, result=rets)
+
+        cv2.imshow('_', frame)
+        if cv2.waitKey(1) == ord('q'):
+            print("-- CV2 Stop --")
+            break
+
+        time.sleep(0.05)
+    media_loader.stop()
+    print("-- Stop program --")
+
+
+
+if __name__ == "__main__":
+    test()

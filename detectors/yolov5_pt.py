@@ -16,7 +16,7 @@ os.chdir(ROOT)
 
 
 class YoloDetector(nn.Module):
-    def __init__(self, weight='yolov5s.pt', device=torch.device('cpu'), img_size=640, fp16=False, auto=True, fuse=True):
+    def __init__(self, weight='yolov5s.pt', device="cpu", img_size=640, fp16=False, auto=True, fuse=True):
         super().__init__()
 
         self.device = self.select_device(device)

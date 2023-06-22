@@ -1,4 +1,3 @@
-import yaml
 import os
 import sys
 
@@ -19,12 +18,13 @@ class HumanDetector(object):
         else:
             weight = os.path.abspath(cfg.DET_MODEL_PATH)
         device = cfg.DEVICE
+        fp16 = cfg.HALF
+        img_size = cfg.IMG_SIZE
 
         # model load with weight
-        self.detector = YoloDetector(weight=weight, device=device, img_size=cfg.IMG_SIZE, fp16=cfg.HALF)
+        self.detector = YoloDetector(weight=weight, device=device, img_size=img_size, fp16=fp16)
 
         # warm up
-        img_size = cfg.IMG_SIZE
         self.detector.warmup(imgsz=(1, 3, img_size, img_size))
 
     def preprocess(self, img):
