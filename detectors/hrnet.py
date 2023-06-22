@@ -52,7 +52,7 @@ class HRNet(nn.Module):
         rotation = 0
         model_inputs = []
         for center, scale in zip(centers, scales):
-            trans = self.get_affine_transform(center, scale, rotation)
+            trans = self.get_affine_transform(center, scale, rotation, self.img_size)
             # Crop smaller image of people
             model_input = cv2.warpAffine(
                 im,
@@ -79,6 +79,17 @@ class HRNet(nn.Module):
         return output
 
     def postprocess(self, preds, center, scale):
+        """
+        coords, conf = get_final_preds(
+        cfg,
+        output.cpu().detach().numpy(),
+        np.asarray(centers),
+        np.asarray(scales))
+        #print(coords, conf)
+        # print("@2-2", time.time() - st)
+        return np.concatenate((coords, conf), axis=2)
+        """
+
         batch_heatmaps = preds.cpu().detach().numpy()
         coords, maxvals = self.get_max_preds(batch_heatmaps)
         heatmap_height = batch_heatmaps.shape[2]
@@ -105,9 +116,8 @@ class HRNet(nn.Module):
             preds[i] = self.transform_preds(
                 coords[i], center[i], scale[i], [heatmap_width, heatmap_height]
             )
-        # print(preds)
-
-        return preds, maxvals
+        preds = np.concatenate((preds, maxvals), axis=2)
+        return preds
 
 
     @staticmethod
@@ -171,7 +181,9 @@ class HRNet(nn.Module):
 
         return center, scale
 
-    def get_affine_transform(self, center, scale, rot, shift=np.array([0, 0], dtype=np.float32), inv=0):
+    @staticmethod
+    def get_affine_transform(center, scale, rot, output_size,
+                             shift=np.array([0, 0], dtype=np.float32), inv=0):
         def get_3rd_point(a, b):
             direct = a - b
             return b + np.array([-direct[1], direct[0]], dtype=np.float32)
@@ -191,8 +203,8 @@ class HRNet(nn.Module):
 
         scale_tmp = scale * 200.0
         src_w = scale_tmp[0]
-        dst_w = self.img_size[0]
-        dst_h = self.img_size[1]
+        dst_w = output_size[0]
+        dst_h = output_size[1]
 
         _rot_rad = np.pi * rot / 180
         src_dir = get_dir([0, src_w * -0.5], _rot_rad)
@@ -217,6 +229,7 @@ class HRNet(nn.Module):
 
     def transform_preds(self, coords, center, scale, output_size):
         target_coords = np.zeros(coords.shape)
+
         trans = self.get_affine_transform(center, scale, 0, output_size, inv=1)
         print(trans)
         for p in range(coords.shape[0]):
@@ -243,8 +256,8 @@ class HRNet(nn.Module):
         num_joints = batch_heatmaps.shape[1]
         width = batch_heatmaps.shape[3]
         heatmaps_reshaped = batch_heatmaps.reshape((batch_size, num_joints, -1))
-        idx = np.argmax(heatmaps_reshaped, 2)
-        maxvals = np.amax(heatmaps_reshaped, 2)
+        idx = np.argmax(heatmaps_reshaped, 2)       # 최대값 인덱스
+        maxvals = np.amax(heatmaps_reshaped, 2)     # 최대값 value
 
         maxvals = maxvals.reshape((batch_size, num_joints, 1))
         idx = idx.reshape((batch_size, num_joints, 1))
@@ -278,7 +291,7 @@ if __name__ == "__main__":
     kept_inputs, centers, scales = keypointer.preprocess(input_img, det)
     kept_pred = keypointer.forward(kept_inputs)
     kept_pred = keypointer.postprocess(kept_pred, np.asarray(centers), np.asarray(scales))
-    #print(kept_pred)
+    print(kept_pred)
 
 
     for d in det:
