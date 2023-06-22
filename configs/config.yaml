@@ -13,4 +13,4 @@ HALF: false
 KEPT_MODEL_TYPE: "hrnet"
 KEPT_MODEL_PATH: './weights/hrnet_merge_w48_384x288.pth'
 KEPT_HALF: false
-KEPT_IMG_SIZE: [384, 288]
+KEPT_IMG_SIZE: [288, 384]

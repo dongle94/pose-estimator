@@ -157,7 +157,7 @@ class HRNet(nn.Module):
         center[0] = top_left_x + box_width * 0.5
         center[1] = top_left_y + box_height * 0.5
 
-        aspect_ratio = self.img_size[0] * 1.0 / self.img_size[0]
+        aspect_ratio = self.img_size[0] * 1.0 / self.img_size[1]
         pixel_std = 200
 
         if box_width > aspect_ratio * box_height:
