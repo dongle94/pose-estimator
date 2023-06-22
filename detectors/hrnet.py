@@ -16,7 +16,7 @@ os.chdir(ROOT)
 
 
 class HRNet(nn.Module):
-    def __init__(self, weight="pose_hrnet_w48_384x288.pth", device="", fp16=False, img_size=(288, 384)):
+    def __init__(self, weight="pose_hrnet_w48_384x288.pth", device="",  img_size=(288, 384), fp16=False):
         super().__init__()
 
         self.device = self.select_device(device)
@@ -32,7 +32,9 @@ class HRNet(nn.Module):
                                  std=[0.229, 0.224, 0.225]),
         ])
 
-    def warmup(self):
+    def warmup(self, imgsz=(1, 3, 384, 288)):
+        im = torch.empty(*imgsz, dtype=torch.half if self.fp16 else torch.float, device=self.device)  # input
+        self.forward(im)
         print("-- HRNet warmup -- ")
 
     def preprocess(self, im, boxes):
