@@ -1,0 +1,12 @@
+# 실행
+
+* Inference
+
+0. 가상환경 활성화
+conda activate tuck
+
+1. 경로 이동 
+cd /home/complexion/데이터바우처/pose-estimator/detectors
+
+2. Inference 실행 코드, 동영상 주소 넣어줌 
+python3 pose_detector.py /home/complexion/데이터바우처/pose-estimator/data/videos/정석.mp4

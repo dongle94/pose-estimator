@@ -60,11 +60,14 @@ class MediaLoader(object):
                     self.img = np.zeros_like(self.img)
                     cap.open(stream)
             time.sleep(wait_ms)
+        self.img = None
 
     def is_frame_ready(self):
         return True if self.img is not None else False
 
     def get_frame(self):
+        if self.img is None:
+            return None
         orig_im = self.img.copy()
         return orig_im
 

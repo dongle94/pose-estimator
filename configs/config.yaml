@@ -4,13 +4,13 @@ DEVICE: 0
 
 # Object Detector
 DET_MODEL_TYPE: "yolo"
-DET_MODEL_PATH: './weights/yolov5n.pt'
+DET_MODEL_PATH: './weights/yolov5m.pt'
 IMG_SIZE: 640
 HALF: false
 
 
 # Keypoint Detector
 KEPT_MODEL_TYPE: "hrnet"
-KEPT_MODEL_PATH: './weights/hrnet_merge_w48_384x288.pth'
+KEPT_MODEL_PATH: './weights/hrnet_w48_384x288.pth'
 KEPT_HALF: false
-KEPT_IMG_SIZE: [384, 288]
+KEPT_IMG_SIZE: [288, 384]
