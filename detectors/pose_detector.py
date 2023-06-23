@@ -59,29 +59,39 @@ def test():
 
     s = sys.argv[1]
     media_loader = MediaLoader(s)
-    time.sleep(1)
-    while True:
+
+    while media_loader.img is None:
+        time.sleep(0.001)
+        continue
+
+    while media_loader.cap.isOpened():
         frame = media_loader.get_frame()
+        if frame is None:
+            break
 
         im = obj_detector.preprocess(frame)
         pred = obj_detector.detect(im)
-        ret = obj_detector.postprocess(pred)
+        pred, det = obj_detector.postprocess(pred)
 
-        inps, centers, scales = kept_detector.preprocess(frame, ret[1])
-        preds = kept_detector.detect(inps)
-        rets = kept_detector.postprocess(preds, centers, scales)
+        if det.size()[0]:
+            inps, centers, scales = kept_detector.preprocess(frame, det)
+            preds = kept_detector.detect(inps)
+            rets = kept_detector.postprocess(preds, centers, scales)
+        else:
+            rets = None
 
-        for d in ret[1]:
+        for d in det:
             x1, y1, x2, y2 = map(int, d[:4])
             cv2.rectangle(frame, (x1, y1), (x2, y2), (96, 96, 216), thickness=2, lineType=cv2.LINE_AA)
-        frame = vis_pose_result(model=None, img=frame, result=rets)
+        if rets is not None:
+            frame = vis_pose_result(model=None, img=frame, result=rets)
 
         cv2.imshow('_', frame)
         if cv2.waitKey(1) == ord('q'):
             print("-- CV2 Stop --")
             break
 
-        time.sleep(0.05)
+        time.sleep(0.001)
     media_loader.stop()
     print("-- Stop program --")
 
