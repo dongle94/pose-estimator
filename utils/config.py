@@ -22,6 +22,11 @@ _C.KEPT_HALF = False
 _C.KEPT_IMG_SIZE = [288, 384]
 
 
+# Logger
+_C.LOG_LEVEL = 'DEBUG'
+_C.LOG_FILE_PATH = './log/'
+
+
 
 def update_config(cfg, args):
     if not args:
