@@ -22,6 +22,19 @@ _C.KEPT_HALF = False
 _C.KEPT_IMG_SIZE = [288, 384]
 
 
+# Logger
+_C.LOG_LEVEL = 'DEBUG'
+_C.CONSOLE_LOG = False
+_C.LOGGER_NAME = ""
+_C.FILE_LOG = False
+_C.LOG_FILE_DIR = './log/'
+_C.LOG_FILE_SIZE = 100
+_C.LOG_FILE_COUNTER = 10
+_C.LOG_FILE_ROTATE_TIME = "D"
+_C.LOG_FILE_ROTATE_INTERVAL = 1
+
+
+
 
 def update_config(cfg, args):
     if not args:
