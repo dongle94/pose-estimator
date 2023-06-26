@@ -19,7 +19,7 @@ def init_logger(cfg=None, name="empty_logger", filename="", loglevel="debug"):
         _logger = logging.getLogger(name)
 
         # LOG LEVEL
-        log_level = cfg.LOG_LEVEL if cfg.LOG_LEVEL else "DEBUG"
+        log_level = cfg.LOG_LEVEL.upper() if cfg.LOG_LEVEL else "DEBUG"
         _logger.setLevel(log_level)
 
         # LOG CONSOLE
@@ -56,6 +56,7 @@ def init_logger(cfg=None, name="empty_logger", filename="", loglevel="debug"):
             _logger.addHandler(_handler)
 
     else:       # cfg is None
+        loglevel = loglevel.upper()
         _logger = logging.getLogger(name)
         _logger.setLevel(loglevel)
 
