@@ -50,13 +50,21 @@ def test():
     from utils.config import update_config
     from utils.medialoader import MediaLoader
     from utils.visualization import vis_pose_result
+    from utils.logger import init_logger, get_logger
 
+    # get config
     update_config(cfg, args='./configs/config.yaml')
     print(cfg)
 
+    # get logger
+    init_logger(cfg=cfg)
+    logger = get_logger()
+
+    # get detectors
     obj_detector = HumanDetector(cfg=cfg)
     kept_detector = PoseDetector(cfg=cfg)
 
+    # get media loader by params
     s = sys.argv[1]
     media_loader = MediaLoader(s)
 
@@ -65,36 +73,48 @@ def test():
         continue
 
     while media_loader.cap.isOpened():
+        # Get Input frame
         frame = media_loader.get_frame()
         if frame is None:
+            logger.info("Frame is None -- Break main loop")
             break
 
+        # Human Detection
         im = obj_detector.preprocess(frame)
         pred = obj_detector.detect(im)
         pred, det = obj_detector.postprocess(pred)
 
+        # Pose Detection
         if det.size()[0]:
             inps, centers, scales = kept_detector.preprocess(frame, det)
             preds = kept_detector.detect(inps)
-            rets = kept_detector.postprocess(preds, centers, scales)
+
+            rets, heatmaps = kept_detector.postprocess(preds, centers, scales)
+            heatmap = kept_detector.detector.merge_heatmaps(heatmaps, det, frame.shape)
         else:
             rets = None
+            heatmap = None
 
+        # Show Processed Videos
         for d in det:
             x1, y1, x2, y2 = map(int, d[:4])
             cv2.rectangle(frame, (x1, y1), (x2, y2), (96, 96, 216), thickness=2, lineType=cv2.LINE_AA)
         if rets is not None:
             frame = vis_pose_result(model=None, img=frame, result=rets)
-
         cv2.imshow('_', frame)
+
+        # Show Processed Heatmap
+        if heatmap is not None:
+            #heatmap = cv2.resize(heatmap, (360, 640))
+            cv2.imshow('heatmap', heatmap)
+
         if cv2.waitKey(1) == ord('q'):
-            print("-- CV2 Stop --")
+            logger.info("-- CV2 Stop by Keyboard Input --")
             break
 
         time.sleep(0.001)
     media_loader.stop()
-    print("-- Stop program --")
-
+    logger.info("-- Stop program --")
 
 
 if __name__ == "__main__":
