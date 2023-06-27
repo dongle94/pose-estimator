@@ -74,9 +74,6 @@ class HRNet(nn.Module):
         return inputs, centers, scales
 
     def forward(self, inputs):
-        if self.fp16 and inputs.dtype != torch.float16:
-            inputs = inputs.half()
-
         output = self.model(inputs)
         return output
 
