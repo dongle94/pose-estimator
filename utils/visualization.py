@@ -23,7 +23,7 @@ def vis_pose_result(model,
         show (bool):  Whether to show the image. Default True.
         out_file (str|None): The filename of the output visualization image.
     """
-    # TODO: These will be removed in the later versions.
+
     palette = np.array([[255, 128, 0], [255, 153, 51], [255, 178, 102],
                         [230, 230, 0], [255, 153, 255], [153, 204, 255],
                         [255, 102, 255], [255, 51, 255], [102, 178, 255],
@@ -160,3 +160,27 @@ def imshow_keypoints(img,
 
     return img
 
+
+def merge_heatmaps(heatmaps, boxes, img_size):
+    heatmap = np.zeros((img_size[0], img_size[1]), dtype=np.float32)
+
+    for h, b in zip(heatmaps, boxes):
+        new_heatmap = np.zeros((img_size[0], img_size[1]), dtype=np.float32)
+        x1, y1, x2, y2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
+        box_w, box_h = x2 - x1, y2 - y1
+
+        # h = cv2.resize(h, (h.shape[1]*2, h.shape[0]*2))
+        h0, w0 = h.shape
+        h = h[int(h0 * 0.1):int(h0 * 0.9), int(w0 * 0.1):int(w0 * 0.9)]
+
+        h0, w0 = h.shape
+        box_ratio = box_w / box_h
+        nw = h0 * box_ratio
+        k = int((w0 - nw) / 2)
+        h = h[:, k: w0 - k + 1]
+
+        resize_h = cv2.resize(h, (box_w, box_h))
+
+        new_heatmap[y1:y2, x1:x2] = resize_h
+        heatmap = np.maximum(heatmap, new_heatmap)
+    return heatmap

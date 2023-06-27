@@ -287,30 +287,6 @@ class HRNet(nn.Module):
             heatmaps.append(new_heatmap)
         return heatmaps
 
-    def merge_heatmaps(self, heatmaps, boxes, img_size):
-        base_heatmap = np.zeros((img_size[0], img_size[1]), dtype=np.float32)
-
-        for h, b in zip(heatmaps, boxes):
-            new_heatmap = np.zeros((img_size[0], img_size[1]), dtype=np.float32)
-            x1, y1, x2, y2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
-            box_w, box_h = x2-x1, y2-y1
-
-            #h = cv2.resize(h, (h.shape[1]*2, h.shape[0]*2))
-            h0, w0 = h.shape
-            h = h[int(h0*0.1):int(h0*0.9), int(w0*0.1):int(w0*0.9)]
-
-            h0, w0 = h.shape
-            box_ratio = box_w / box_h
-            nw = h0 * box_ratio
-            k = int((w0 - nw) / 2)
-            h = h[:, k: w0-k+1]
-
-            resize_h = cv2.resize(h, (box_w, box_h))
-
-            new_heatmap[y1:y2, x1:x2] = resize_h
-            base_heatmap = np.maximum(base_heatmap, new_heatmap)
-        return base_heatmap
-
 
 if __name__ == "__main__":
     from detectors.yolov5_pt import YoloDetector
