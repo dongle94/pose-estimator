@@ -45,15 +45,18 @@ class PoseDetector(object):
 def test():
     import time
     import cv2
+    import pandas as pd
     from detectors.obj_detector import HumanDetector
     from utils.config import _C as cfg
     from utils.config import update_config
     from utils.medialoader import MediaLoader
     from utils.visualization import vis_pose_result
+    from utils.tuck_rule import count_rule
 
     update_config(cfg, args='./configs/config.yaml')
     print(cfg)
 
+    result = pd.DataFrame()
     obj_detector = HumanDetector(cfg=cfg)
     kept_detector = PoseDetector(cfg=cfg)
 
@@ -80,8 +83,19 @@ def test():
             # preds : [1,17,96,72] 예측 관절좌표 (관절당 히트맵)
             rets = kept_detector.postprocess(preds, centers, scales)
             # rets : [1,17,3] (관절당 히트맵 중)
+            
+            # 추가 
+            result_tmp = count_rule(rets[0])
+            # 결과 합침
+            result = pd.concat([result, result_tmp])
         else:
             rets = None
+        
+        
+        # 손목
+        # print(rets[0][9][:2], rets[0][10][:2])
+
+
 
         for d in det:
             x1, y1, x2, y2 = map(int, d[:4])
@@ -95,6 +109,8 @@ def test():
             break
 
         time.sleep(0.001)
+    # 모든 Frame 결과 저장
+    result.to_csv('result.csv', index=False)
     media_loader.stop()
     print("-- Stop program --")
 
