@@ -83,7 +83,10 @@ class HRNet(nn.Module):
     def postprocess(self, preds, center, scale):
         batch_heatmaps = preds.cpu().detach().numpy()
 
+        # raw_heatmap -> heatmaps
         heatmaps = self.get_heatmaps(batch_heatmaps)
+
+        # raw_heatmaps -> coordinates
         coords, maxvals = self.get_max_preds(batch_heatmaps)
 
         heatmap_height = batch_heatmaps.shape[2]
@@ -294,6 +297,17 @@ class HRNet(nn.Module):
             new_heatmap = np.zeros((img_size[0], img_size[1]), dtype=np.float32)
             x1, y1, x2, y2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
             box_w, box_h = x2-x1, y2-y1
+
+            #h = cv2.resize(h, (h.shape[1]*2, h.shape[0]*2))
+            h0, w0 = h.shape
+            h = h[int(h0*0.1):int(h0*0.9), int(w0*0.1):int(w0*0.9)]
+
+            h0, w0 = h.shape
+            box_ratio = box_w / box_h
+            nw = h0 * box_ratio
+            k = int((w0 - nw) / 2)
+            h = h[:, k: w0-k+1]
+
             resize_h = cv2.resize(h, (box_w, box_h))
 
             new_heatmap[y1:y2, x1:x2] = resize_h
