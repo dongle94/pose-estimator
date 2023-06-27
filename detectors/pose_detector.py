@@ -38,16 +38,17 @@ class PoseDetector(object):
 
         return preds
 
-    def postprocess(self, preds, centers, scales, heatmap=False):
-        preds, heatmaps = self.detector.postprocess(preds, centers, scales, heatmap)
-        return preds, heatmaps
+    def postprocess(self, preds, centers, scales):
+        preds, raw_heatmaps = self.detector.postprocess(preds, centers, scales)
+        return preds, raw_heatmaps
+
 
 def test():
     import time
     import cv2
     from detectors.obj_detector import HumanDetector
     from utils.medialoader import MediaLoader
-    from utils.visualization import vis_pose_result, merge_heatmaps
+    from utils.visualization import vis_pose_result, get_heatmaps, merge_heatmaps
 
     # get detectors
     obj_detector = HumanDetector(cfg=cfg)
@@ -77,8 +78,9 @@ def test():
         if det.size()[0]:
             inps, centers, scales = kept_detector.preprocess(frame, det)
             preds = kept_detector.detect(inps)
-            rets, heatmaps = kept_detector.postprocess(preds, centers, scales, heatmap=True)
+            rets, raw_heatmaps = kept_detector.postprocess(preds, centers, scales)
 
+            heatmaps = get_heatmaps(raw_heatmaps, colormap=None)
             heatmap = merge_heatmaps(heatmaps, det, frame.shape)
         else:
             rets = None
@@ -94,9 +96,10 @@ def test():
 
         # Show Processed Heatmap
         if heatmap is not None:
-            new_heatmap = np.uint8(255 * heatmap)
-            new_heatmap = cv2.applyColorMap(new_heatmap, cv2.COLORMAP_JET)
-            new_heatmap = cv2.add((0.4 * new_heatmap).astype(np.uint8), frame)
+            if len(heatmap.shape) == 2:
+                heatmap = np.uint8(255 * heatmap)
+                heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+            new_heatmap = cv2.add((0.4 * heatmap).astype(np.uint8), frame)
             cv2.imshow('heatmap', new_heatmap)
 
         if cv2.waitKey(1) == ord('q'):
