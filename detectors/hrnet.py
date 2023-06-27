@@ -82,7 +82,10 @@ class HRNet(nn.Module):
 
     def postprocess(self, preds, center, scale):
         batch_heatmaps = preds.cpu().detach().numpy()
+
+        heatmaps = self.get_heatmaps(batch_heatmaps)
         coords, maxvals = self.get_max_preds(batch_heatmaps)
+
         heatmap_height = batch_heatmaps.shape[2]
         heatmap_width = batch_heatmaps.shape[3]
 
@@ -108,7 +111,7 @@ class HRNet(nn.Module):
                 coords[i], center[i], scale[i], [heatmap_width, heatmap_height]
             )
         preds = np.concatenate((preds, maxvals), axis=2)
-        return preds
+        return preds, heatmaps
 
 
     @staticmethod
@@ -263,6 +266,40 @@ class HRNet(nn.Module):
         preds *= pred_mask
         return preds, maxvals
 
+    @staticmethod
+    def get_heatmaps(batch_heatmaps, colormap=None):
+        """
+
+        :param batch_heatmaps:
+        :return:
+        """
+        heatmaps = []
+        for _heatmaps in batch_heatmaps:
+            new_heatmap = np.zeros((_heatmaps.shape[1], _heatmaps.shape[2]),dtype=np.float32)
+            for heatmap in _heatmaps:
+                new_heatmap = np.maximum(new_heatmap, heatmap)
+
+            #new_heatmap = cv2.resize(new_heatmap, [new_heatmap.shape[1], new_heatmap.shape[0]])
+            #print(new_heatmap.shape)
+            if colormap is not None:
+                new_heatmap = new_heatmap * 255
+                new_heatmap = cv2.applyColorMap(new_heatmap.astype(np.uint8), colormap)
+            heatmaps.append(new_heatmap)
+        return heatmaps
+
+    def merge_heatmaps(self, heatmaps, boxes, img_size):
+        base_heatmap = np.zeros((img_size[0], img_size[1]), dtype=np.float32)
+
+        for h, b in zip(heatmaps, boxes):
+            new_heatmap = np.zeros((img_size[0], img_size[1]), dtype=np.float32)
+            x1, y1, x2, y2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
+            box_w, box_h = x2-x1, y2-y1
+            resize_h = cv2.resize(h, (box_w, box_h))
+
+            new_heatmap[y1:y2, x1:x2] = resize_h
+            base_heatmap = np.maximum(base_heatmap, new_heatmap)
+        return base_heatmap
+
 
 if __name__ == "__main__":
     from detectors.yolov5_pt import YoloDetector
@@ -281,8 +318,7 @@ if __name__ == "__main__":
     input_img = im0.copy()
     kept_inputs, centers, scales = keypointer.preprocess(input_img, det)
     kept_pred = keypointer.forward(kept_inputs)
-    kept_pred = keypointer.postprocess(kept_pred, np.asarray(centers), np.asarray(scales))
-
+    kept_pred, heatmaps = keypointer.postprocess(kept_pred, np.asarray(centers), np.asarray(scales))
 
     for d in det:
         x1, y1, x2, y2 = map(int, d[:4])
