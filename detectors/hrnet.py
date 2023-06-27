@@ -77,11 +77,13 @@ class HRNet(nn.Module):
         output = self.model(inputs)
         return output
 
-    def postprocess(self, preds, center, scale):
+    def postprocess(self, preds, center, scale, heatmap=False):
         batch_heatmaps = preds.cpu().detach().numpy()
 
         # raw_heatmap -> heatmaps
-        heatmaps = self.get_heatmaps(batch_heatmaps)
+        _heatmaps = None
+        if heatmap:
+            _heatmaps = self.get_heatmaps(batch_heatmaps)
 
         # raw_heatmaps -> coordinates
         coords, maxvals = self.get_max_preds(batch_heatmaps)
@@ -111,7 +113,7 @@ class HRNet(nn.Module):
                 coords[i], center[i], scale[i], [heatmap_width, heatmap_height]
             )
         preds = np.concatenate((preds, maxvals), axis=2)
-        return preds, heatmaps
+        return preds, _heatmaps
 
 
     @staticmethod

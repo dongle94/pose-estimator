@@ -1,5 +1,6 @@
 import os
 import sys
+import numpy as np
 
 from pathlib import Path
 FILE = Path(__file__).resolve()
@@ -29,7 +30,7 @@ class PoseDetector(object):
 
     def preprocess(self, img, boxes):
         # boxes coords are ltrb
-        inp, centers, scales =  self.detector.preprocess(img, boxes)
+        inp, centers, scales = self.detector.preprocess(img, boxes)
         return inp, centers, scales
 
     def detect(self, inputs):
@@ -37,28 +38,16 @@ class PoseDetector(object):
 
         return preds
 
-    def postprocess(self, preds, centers, scales):
-        preds = self.detector.postprocess(preds, centers, scales)
-
-        return preds
+    def postprocess(self, preds, centers, scales, heatmap=False):
+        preds, heatmaps = self.detector.postprocess(preds, centers, scales, heatmap)
+        return preds, heatmaps
 
 def test():
     import time
     import cv2
     from detectors.obj_detector import HumanDetector
-    from utils.config import _C as cfg
-    from utils.config import update_config
     from utils.medialoader import MediaLoader
-    from utils.visualization import vis_pose_result
-    from utils.logger import init_logger, get_logger
-
-    # get config
-    update_config(cfg, args='./configs/config.yaml')
-    print(cfg)
-
-    # get logger
-    init_logger(cfg=cfg)
-    logger = get_logger()
+    from utils.visualization import vis_pose_result, merge_heatmaps
 
     # get detectors
     obj_detector = HumanDetector(cfg=cfg)
@@ -88,9 +77,9 @@ def test():
         if det.size()[0]:
             inps, centers, scales = kept_detector.preprocess(frame, det)
             preds = kept_detector.detect(inps)
+            rets, heatmaps = kept_detector.postprocess(preds, centers, scales, heatmap=True)
 
-            rets, heatmaps = kept_detector.postprocess(preds, centers, scales)
-            heatmap = kept_detector.detector.merge_heatmaps(heatmaps, det, frame.shape)
+            heatmap = merge_heatmaps(heatmaps, det, frame.shape)
         else:
             rets = None
             heatmap = None
@@ -105,8 +94,10 @@ def test():
 
         # Show Processed Heatmap
         if heatmap is not None:
-            #heatmap = cv2.resize(heatmap, (360, 640))
-            cv2.imshow('heatmap', heatmap)
+            new_heatmap = np.uint8(255 * heatmap)
+            new_heatmap = cv2.applyColorMap(new_heatmap, cv2.COLORMAP_JET)
+            new_heatmap = cv2.add((0.4 * new_heatmap).astype(np.uint8), frame)
+            cv2.imshow('heatmap', new_heatmap)
 
         if cv2.waitKey(1) == ord('q'):
             logger.info("-- CV2 Stop by Keyboard Input --")
@@ -118,4 +109,16 @@ def test():
 
 
 if __name__ == "__main__":
+    from utils.config import _C as cfg
+    from utils.config import update_config
+    from utils.logger import init_logger, get_logger
+
+    # get config
+    update_config(cfg, args='./configs/config.yaml')
+    print(cfg)
+
+    # get logger
+    init_logger(cfg=cfg)
+    logger = get_logger()
+
     test()
