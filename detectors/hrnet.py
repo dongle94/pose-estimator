@@ -77,13 +77,8 @@ class HRNet(nn.Module):
         output = self.model(inputs)
         return output
 
-    def postprocess(self, preds, center, scale, heatmap=False):
+    def postprocess(self, preds, center, scale):
         batch_heatmaps = preds.cpu().detach().numpy()
-
-        # raw_heatmap -> heatmaps
-        _heatmaps = None
-        if heatmap:
-            _heatmaps = self.get_heatmaps(batch_heatmaps)
 
         # raw_heatmaps -> coordinates
         coords, maxvals = self.get_max_preds(batch_heatmaps)
@@ -113,7 +108,7 @@ class HRNet(nn.Module):
                 coords[i], center[i], scale[i], [heatmap_width, heatmap_height]
             )
         preds = np.concatenate((preds, maxvals), axis=2)
-        return preds, _heatmaps
+        return preds, batch_heatmaps
 
 
     @staticmethod
@@ -268,35 +263,14 @@ class HRNet(nn.Module):
         preds *= pred_mask
         return preds, maxvals
 
-    @staticmethod
-    def get_heatmaps(batch_heatmaps, colormap=None):
-        """
-
-        :param batch_heatmaps:
-        :return:
-        """
-        heatmaps = []
-        for _heatmaps in batch_heatmaps:
-            new_heatmap = np.zeros((_heatmaps.shape[1], _heatmaps.shape[2]),dtype=np.float32)
-            for heatmap in _heatmaps:
-                new_heatmap = np.maximum(new_heatmap, heatmap)
-
-            #new_heatmap = cv2.resize(new_heatmap, [new_heatmap.shape[1], new_heatmap.shape[0]])
-            #print(new_heatmap.shape)
-            if colormap is not None:
-                new_heatmap = new_heatmap * 255
-                new_heatmap = cv2.applyColorMap(new_heatmap.astype(np.uint8), colormap)
-            heatmaps.append(new_heatmap)
-        return heatmaps
-
 
 if __name__ == "__main__":
     from detectors.yolov5_pt import YoloDetector
-    from utils.visualization import vis_pose_result
+    from utils.visualization import vis_pose_result, get_heatmaps, merge_heatmaps
     detector = YoloDetector(weight='./weights/yolov5n.pt', device=0, img_size=640)
     detector.warmup()
 
-    keypointer = HRNet(weight="./weights/hrnet_w48_384x288.pth", device=0, fp16=True, img_size=(288, 384))
+    keypointer = HRNet(weight="./weights/hrnet_merge_w48_384x288.pth", device=0, fp16=True, img_size=(288, 384))
     keypointer.warmup()
 
     img = cv2.imread('./data/images/army.jpg')
@@ -307,11 +281,21 @@ if __name__ == "__main__":
     input_img = im0.copy()
     kept_inputs, centers, scales = keypointer.preprocess(input_img, det)
     kept_pred = keypointer.forward(kept_inputs)
-    kept_pred, heatmaps = keypointer.postprocess(kept_pred, np.asarray(centers), np.asarray(scales))
+    kept_pred, raw_heatmaps = keypointer.postprocess(kept_pred, np.asarray(centers), np.asarray(scales))
+
+    # process heatmap
+    heatmaps = get_heatmaps(raw_heatmaps, colormap=cv2.COLORMAP_JET)
+    heatmap = merge_heatmaps(heatmaps, det, im0.shape)
 
     for d in det:
         x1, y1, x2, y2 = map(int, d[:4])
         cv2.rectangle(im0, (x1, y1), (x2, y2), (128, 128, 240), thickness=2, lineType=cv2.LINE_AA)
     im0 = vis_pose_result(model=None, img=im0, result=kept_pred)
     cv2.imshow('_', im0)
+
+    # if heatmap's colormap is None, activate annotaion.
+    #new_heatmap = np.uint8(255 * heatmap)
+    #new_heatmap = cv2.applyColorMap(new_heatmap, cv2.COLORMAP_JET)
+    new_heatmap = cv2.add((0.4 * heatmap).astype(np.uint8), im0)
+    cv2.imshow("+", new_heatmap)
     cv2.waitKey(0)
