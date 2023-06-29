@@ -183,7 +183,7 @@ def get_heatmaps(batch_heatmaps, colormap=None, draw_index: list = None):
 
 
 def merge_heatmaps(heatmaps, boxes, img_size):
-    if len(heatmaps[0].shape) == 3:
+    if heatmaps and len(heatmaps[0].shape) == 3:
         heatmap = np.zeros((img_size[0], img_size[1], img_size[2]), dtype=np.float32)
     else:
         heatmap = np.zeros((img_size[0], img_size[1]), dtype=np.float32)
