@@ -19,11 +19,12 @@ class YoloDetector(nn.Module):
     def __init__(self, weight='yolov5s.pt', device="cpu", img_size=640, fp16=False, auto=True, fuse=True):
         super().__init__()
 
+        device = "cpu" if device == "" else device
         self.device = self.select_device(device)
         self.cuda = torch.cuda.is_available() and device
-        self.fp16 = fp16
+        self.fp16 = True if fp16 and self.device.type != "cpu" else False
         model = attempt_load(weight, device=device, inplace=True, fuse=fuse)
-        model.half() if fp16 else model.float()
+        model.half() if self.fp16 else model.float()
         self.model = model
         self.stride = max(int(model.stride.max()), 32)
         self.img_size = check_img_size(img_size, s=self.stride)
@@ -115,7 +116,7 @@ def attempt_load(weight, device=None, inplace=True, fuse=True):
     return ckpt
 
 if __name__ == "__main__":
-    model = YoloDetector(weight='./weights/yolov5n.pt', device='cpu', img_size=640)
+    model = YoloDetector(weight='./weights/yolov5n.pt', device=0, img_size=640)
     model.warmup()
 
     import cv2
