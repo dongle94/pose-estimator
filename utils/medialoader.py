@@ -9,13 +9,15 @@ import time
 IMG_FORMATS = 'bmp', 'dng', 'jpeg', 'jpg', 'mpo', 'png', 'tif', 'tiff', 'webp', 'pfm'       # include image suffixes
 VID_FORMATS = 'asf', 'avi', 'gif', 'm4v', 'mkv', 'mov', 'mp4', 'mpeg', 'mpg', 'ts', 'wmv'   # include video suffixes
 
-def check_sources(s):
+
+def check_sources(source):
     is_file, is_url, is_webcam = False, False, False
-    is_file = Path(s).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
-    is_url = s.lower().startswith(('rtsp://', 'rtmp://', 'http://', 'https://'))
-    is_webcam = s.isnumeric() or s.endswith('.streams') or (is_url and not is_file)
+    is_file = Path(source).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
+    is_url = source.lower().startswith(('rtsp://', 'rtmp://', 'http://', 'https://'))
+    is_webcam = source.isnumeric() or source.endswith('.streams') or (is_url and not is_file)
 
     return is_file, is_url, is_webcam
+
 
 class MediaLoader(object):
     def __init__(self, source, save_result=False, save_path="", stride=1):
