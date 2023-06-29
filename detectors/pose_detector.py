@@ -11,6 +11,7 @@ os.chdir(ROOT)
 
 from detectors.hrnet import HRNet
 
+
 class PoseDetector(object):
     def __init__(self, cfg=None):
         # Keypoint Detector model configuration
@@ -18,12 +19,14 @@ class PoseDetector(object):
             weight = os.path.abspath(os.path.join(ROOT, cfg.KEPT_MODEL_PATH))
         else:
             weight = os.path.abspath(cfg.KEPT_MODEL_PATH)
+        weight_cfg = cfg.KEPT_MODEL_CNF
         device = cfg.DEVICE
         fp16 = cfg.KEPT_HALF
         img_size = cfg.KEPT_IMG_SIZE
 
         # Model load with weight
-        self.detector = HRNet(weight=weight, device=device, img_size=img_size, fp16=fp16)
+        self.detector = HRNet(weight=weight, weight_cfg=weight_cfg,
+                              device=device, img_size=img_size, fp16=fp16)
 
         # warm up
         self.detector.warmup(imgsz=(1, 3, img_size[0], img_size[1]))
@@ -43,7 +46,7 @@ class PoseDetector(object):
         return preds, raw_heatmaps
 
 
-def test():
+def test(cfg):
     import time
     import cv2
     from detectors.obj_detector import HumanDetector
@@ -116,16 +119,16 @@ def test():
 
 
 if __name__ == "__main__":
-    from utils.config import _C as cfg
+    from utils.config import _C as _cfg
     from utils.config import update_config
     from utils.logger import init_logger, get_logger
 
     # get config
-    update_config(cfg, args='./configs/config.yaml')
-    print(cfg)
+    update_config(_cfg, args='./configs/config.yaml')
+    print(_cfg)
 
     # get logger
-    init_logger(cfg=cfg)
+    init_logger(cfg=_cfg)
     logger = get_logger()
 
-    test()
+    test(_cfg)
