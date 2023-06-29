@@ -284,7 +284,7 @@ if __name__ == "__main__":
     kept_pred, raw_heatmaps = keypointer.postprocess(kept_pred, np.asarray(centers), np.asarray(scales))
 
     # process heatmap
-    heatmaps = get_heatmaps(raw_heatmaps, colormap=cv2.COLORMAP_JET)
+    heatmaps = get_heatmaps(raw_heatmaps, colormap=None)
     heatmap = merge_heatmaps(heatmaps, det, im0.shape)
 
     for d in det:
@@ -293,9 +293,9 @@ if __name__ == "__main__":
     im0 = vis_pose_result(model=None, img=im0, result=kept_pred)
     cv2.imshow('_', im0)
 
-    # if heatmap's colormap is None, activate annotaion.
-    #new_heatmap = np.uint8(255 * heatmap)
-    #new_heatmap = cv2.applyColorMap(new_heatmap, cv2.COLORMAP_JET)
+    if len(heatmap.shape) == 2:
+        heatmap = np.uint8(255 * heatmap)
+        heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_HOT)
     new_heatmap = cv2.add((0.4 * heatmap).astype(np.uint8), im0)
     cv2.imshow("+", new_heatmap)
     cv2.waitKey(0)
