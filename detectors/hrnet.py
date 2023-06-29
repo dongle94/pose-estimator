@@ -16,14 +16,25 @@ os.chdir(ROOT)
 
 
 class HRNet(nn.Module):
-    def __init__(self, weight="pose_hrnet_w48_384x288.pth", device="",  img_size=(288, 384), fp16=False):
+    def __init__(self, weight, weight_cfg="", device="",  img_size=(288, 384), fp16=False):
         super().__init__()
 
+        device = "cpu" if device == "" else device
         self.device = self.select_device(device)
-        model = torch.load(weight).to(self.device).eval()
+        if weight_cfg == "":
+            model = torch.load(weight).to(self.device).eval()
+        else:
+            from detectors.hrnet_config import _C as _cfg
+            from pose_hrnet import PoseHighResolutionNet
+            _cfg.defrost()
+            _cfg.merge_from_file(weight_cfg)
+            _cfg.freeze()
+            model = PoseHighResolutionNet(cfg=_cfg)
+            model.load_state_dict(torch.load(weight), strict=False)
+            model = model.to(self.device).eval()
 
-        self.fp16 = fp16
-        self.model = model.half() if fp16 else model.float()
+        self.fp16 = True if fp16 and self.device.type != "cpu" else False
+        self.model = model.half() if self.fp16 else model.float()
         self.img_size = img_size
 
         self.pose_transform = transforms.Compose([
@@ -267,10 +278,12 @@ class HRNet(nn.Module):
 if __name__ == "__main__":
     from detectors.yolov5_pt import YoloDetector
     from utils.visualization import vis_pose_result, get_heatmaps, merge_heatmaps
-    detector = YoloDetector(weight='./weights/yolov5n.pt', device=0, img_size=640)
+    detector = YoloDetector(weight='./weights/yolov5n.pt', device=0, img_size=640, fp16=True)
     detector.warmup()
 
-    keypointer = HRNet(weight="./weights/hrnet_merge_w48_384x288.pth", device=0, fp16=True, img_size=(288, 384))
+    keypointer = HRNet(weight="./weights/hrnet_merge_w48_384x288.pth",
+                       weight_cfg="",
+                       device=0, fp16=True, img_size=(288, 384))
     keypointer.warmup()
 
     img = cv2.imread('./data/images/army.jpg')
