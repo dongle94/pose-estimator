@@ -30,7 +30,7 @@ class HRNet(nn.Module):
             _cfg.merge_from_file(weight_cfg)
             _cfg.freeze()
             model = PoseHighResolutionNet(cfg=_cfg)
-            model.load_state_dict(torch.load(weight), strict=False)
+            model.load_state_dict(torch.load(weight, map_location=self.device), strict=False)
             model = model.to(self.device).eval()
 
         self.fp16 = True if fp16 and self.device.type != "cpu" else False
