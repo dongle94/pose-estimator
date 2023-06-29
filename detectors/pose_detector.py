@@ -80,7 +80,11 @@ def test():
             preds = kept_detector.detect(inps)
             rets, raw_heatmaps = kept_detector.postprocess(preds, centers, scales)
 
-            heatmaps = get_heatmaps(raw_heatmaps, colormap=None)
+            # Keypoints process
+            new_raw_heatmaps = raw_heatmaps[:]
+            raw_heatmaps = np.asarray(new_raw_heatmaps)
+
+            heatmaps = get_heatmaps(raw_heatmaps, colormap=None, draw_index=None)
             heatmap = merge_heatmaps(heatmaps, det, frame.shape)
         else:
             rets = None

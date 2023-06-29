@@ -161,15 +161,20 @@ def imshow_keypoints(img,
     return img
 
 
-def get_heatmaps(batch_heatmaps, colormap=None):
+def get_heatmaps(batch_heatmaps, colormap=None, draw_index: list = None):
     heatmaps = []
+    if type(draw_index) == list and len(draw_index) == 0:
+        draw_index = None
+    if len(batch_heatmaps.shape) == 3:
+        batch_heatmaps = [batch_heatmaps]
+
     for _heatmaps in batch_heatmaps:
         new_heatmap = np.zeros((_heatmaps.shape[1], _heatmaps.shape[2]), dtype=np.float32)
-        for heatmap in _heatmaps:
+        for idx, heatmap in enumerate(_heatmaps):
+            if draw_index is not None and idx not in draw_index:
+                continue
             new_heatmap = np.maximum(new_heatmap, heatmap)
 
-        # new_heatmap = cv2.resize(new_heatmap, [new_heatmap.shape[1], new_heatmap.shape[0]])
-        # print(new_heatmap.shape)
         if colormap is not None:
             new_heatmap = new_heatmap * 255
             new_heatmap = cv2.applyColorMap(new_heatmap.astype(np.uint8), colormap)
