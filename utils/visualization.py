@@ -23,7 +23,7 @@ def vis_pose_result(model,
         show (bool):  Whether to show the image. Default True.
         out_file (str|None): The filename of the output visualization image.
     """
-    # TODO: These will be removed in the later versions.
+
     palette = np.array([[255, 128, 0], [255, 153, 51], [255, 178, 102],
                         [230, 230, 0], [255, 153, 255], [153, 204, 255],
                         [255, 102, 255], [255, 51, 255], [102, 178, 255],
@@ -160,3 +160,54 @@ def imshow_keypoints(img,
 
     return img
 
+
+def get_heatmaps(batch_heatmaps, colormap=None, draw_index: list = None):
+    heatmaps = []
+    if type(draw_index) == list and len(draw_index) == 0:
+        draw_index = None
+    if len(batch_heatmaps.shape) == 3:
+        batch_heatmaps = [batch_heatmaps]
+
+    for _heatmaps in batch_heatmaps:
+        new_heatmap = np.zeros((_heatmaps.shape[1], _heatmaps.shape[2]), dtype=np.float32)
+        for idx, heatmap in enumerate(_heatmaps):
+            if draw_index is not None and idx not in draw_index:
+                continue
+            new_heatmap = np.maximum(new_heatmap, heatmap)
+
+        if colormap is not None:
+            new_heatmap = new_heatmap * 255
+            new_heatmap = cv2.applyColorMap(new_heatmap.astype(np.uint8), colormap)
+        heatmaps.append(new_heatmap)
+    return heatmaps
+
+
+def merge_heatmaps(heatmaps, boxes, img_size):
+    if len(heatmaps[0].shape) == 3:
+        heatmap = np.zeros((img_size[0], img_size[1], img_size[2]), dtype=np.float32)
+    else:
+        heatmap = np.zeros((img_size[0], img_size[1]), dtype=np.float32)
+
+    for h, b in zip(heatmaps, boxes):
+        if len(heatmaps[0].shape) == 3:
+            new_heatmap = np.zeros((img_size[0], img_size[1], img_size[2]), dtype=np.float32)
+        else:
+            new_heatmap = np.zeros((img_size[0], img_size[1]), dtype=np.float32)
+        x1, y1, x2, y2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
+        box_w, box_h = x2 - x1, y2 - y1
+
+        # h = cv2.resize(h, (h.shape[1]*2, h.shape[0]*2))
+        h0, w0 = h.shape[:2]
+        h = h[int(h0 * 0.1):int(h0 * 0.9), int(w0 * 0.1):int(w0 * 0.9)]
+
+        h0, w0 = h.shape[:2]
+        box_ratio = box_w / box_h
+        nw = h0 * box_ratio
+        k = int((w0 - nw) / 2)
+        h = h[:, k: w0 - k + 1]
+
+        resize_h = cv2.resize(h, (box_w, box_h))
+
+        new_heatmap[y1:y2, x1:x2] = resize_h
+        heatmap = np.maximum(heatmap, new_heatmap)
+    return heatmap

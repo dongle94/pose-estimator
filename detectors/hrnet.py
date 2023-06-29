@@ -74,15 +74,15 @@ class HRNet(nn.Module):
         return inputs, centers, scales
 
     def forward(self, inputs):
-        if self.fp16 and inputs.dtype != torch.float16:
-            inputs = inputs.half()
-
         output = self.model(inputs)
         return output
 
     def postprocess(self, preds, center, scale):
         batch_heatmaps = preds.cpu().detach().numpy()
+
+        # raw_heatmaps -> coordinates
         coords, maxvals = self.get_max_preds(batch_heatmaps)
+
         heatmap_height = batch_heatmaps.shape[2]
         heatmap_width = batch_heatmaps.shape[3]
 
@@ -108,7 +108,7 @@ class HRNet(nn.Module):
                 coords[i], center[i], scale[i], [heatmap_width, heatmap_height]
             )
         preds = np.concatenate((preds, maxvals), axis=2)
-        return preds
+        return preds, batch_heatmaps
 
 
     @staticmethod
@@ -266,11 +266,11 @@ class HRNet(nn.Module):
 
 if __name__ == "__main__":
     from detectors.yolov5_pt import YoloDetector
-    from utils.visualization import vis_pose_result
+    from utils.visualization import vis_pose_result, get_heatmaps, merge_heatmaps
     detector = YoloDetector(weight='./weights/yolov5n.pt', device=0, img_size=640)
     detector.warmup()
 
-    keypointer = HRNet(weight="./weights/hrnet_w48_384x288.pth", device=0, fp16=True, img_size=(288, 384))
+    keypointer = HRNet(weight="./weights/hrnet_merge_w48_384x288.pth", device=0, fp16=True, img_size=(288, 384))
     keypointer.warmup()
 
     img = cv2.imread('./data/images/army.jpg')
@@ -281,12 +281,21 @@ if __name__ == "__main__":
     input_img = im0.copy()
     kept_inputs, centers, scales = keypointer.preprocess(input_img, det)
     kept_pred = keypointer.forward(kept_inputs)
-    kept_pred = keypointer.postprocess(kept_pred, np.asarray(centers), np.asarray(scales))
+    kept_pred, raw_heatmaps = keypointer.postprocess(kept_pred, np.asarray(centers), np.asarray(scales))
 
+    # process heatmap
+    heatmaps = get_heatmaps(raw_heatmaps, colormap=None)
+    heatmap = merge_heatmaps(heatmaps, det, im0.shape)
 
     for d in det:
         x1, y1, x2, y2 = map(int, d[:4])
         cv2.rectangle(im0, (x1, y1), (x2, y2), (128, 128, 240), thickness=2, lineType=cv2.LINE_AA)
     im0 = vis_pose_result(model=None, img=im0, result=kept_pred)
     cv2.imshow('_', im0)
+
+    if len(heatmap.shape) == 2:
+        heatmap = np.uint8(255 * heatmap)
+        heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_HOT)
+    new_heatmap = cv2.add((0.4 * heatmap).astype(np.uint8), im0)
+    cv2.imshow("+", new_heatmap)
     cv2.waitKey(0)
