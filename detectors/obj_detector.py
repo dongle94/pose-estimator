@@ -21,6 +21,7 @@ class HumanDetector(object):
         fp16 = cfg.HALF
         img_size = cfg.IMG_SIZE
 
+        self.detector_type = cfg.DET_MODEL_TYPE.lower()
         # model load with weight
         self.detector = YoloDetector(weight=weight, device=device, img_size=img_size, fp16=fp16)
 
@@ -39,12 +40,16 @@ class HumanDetector(object):
 
         return pred
 
-    def postprocess(self, pred):
-        max_det = 100
-        ret = self.detector.postprocess(pred=pred, im_shape=self.im_shape,
-                                        im0_shape=self.im0_shape, max_det=max_det)
+    def postprocess(self, ret):
+        preds, dets = None, None
+        if self.detector_type == 'yolo':
+            max_det = 100
+            preds, dets = self.detector.postprocess(pred=ret, im_shape=self.im_shape,
+                                                    im0_shape=self.im0_shape, max_det=max_det)
+            preds = preds.cpu().numpy()
+            dets = dets.cpu().numpy()
 
-        return ret
+        return preds, dets
 
 
 if __name__ == "__main__":
@@ -65,9 +70,9 @@ if __name__ == "__main__":
 
         im = detector.preprocess(frame)
         pred = detector.detect(im)
-        ret = detector.postprocess(pred)
+        pred, det = detector.postprocess(pred)
 
-        for d in ret[1]:
+        for d in det:
             x1, y1, x2, y2 = map(int, d[:4])
             cv2.rectangle(frame, (x1, y1), (x2, y2), (96, 96, 216), thickness=2, lineType=cv2.LINE_AA)
 

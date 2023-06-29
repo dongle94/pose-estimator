@@ -78,7 +78,7 @@ def test(cfg):
         pred, det = obj_detector.postprocess(pred)
 
         # Pose Detection
-        if det.size()[0]:
+        if len(det):
             inps, centers, scales = kept_detector.preprocess(frame, det)
             preds = kept_detector.detect(inps)
             rets, raw_heatmaps = kept_detector.postprocess(preds, centers, scales)
