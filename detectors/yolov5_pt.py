@@ -1,18 +1,18 @@
+import sys
 import copy
 import os
 import numpy as np
 import torch
 import torch.nn as nn
 
-from models.yolo import check_img_size, letterbox, non_max_suppression, scale_boxes
-
-import sys
 from pathlib import Path
 FILE = Path(__file__).resolve()
-ROOT = FILE.parents[1]  # YOLOv5 root directory
+ROOT = FILE.parents[1]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 os.chdir(ROOT)
+
+from detectors.models.yolo import check_img_size, letterbox, non_max_suppression, scale_boxes
 
 
 class YoloDetector(nn.Module):

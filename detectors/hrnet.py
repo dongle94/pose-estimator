@@ -49,15 +49,17 @@ class HRNet(nn.Module):
         print("-- HRNet warmup -- ")
 
     def preprocess(self, im, boxes):
-        person_results = []
-        for bbox in boxes[:, :5]:
-            box = bbox.cpu().numpy()
-            person_results.append(box)
-        bboxes_xyxy = np.array(person_results)
+        """
+        HRNet Pre-processing
+
+        :param im: ndarray - original input image array
+        :param boxes: ndarray - [batch, 6] 6 is [x,y,x,y,conf,class]
+        :return:
+        """
 
         centers = []
         scales = []
-        for box in bboxes_xyxy:
+        for box in boxes[:, :5]:
             center, scale = self.box_to_center_scale(box)
             centers.append(center)
             scales.append(scale)
@@ -290,6 +292,8 @@ if __name__ == "__main__":
     im, im0 = detector.preprocess(img)
     pred = detector.forward(im)
     pred, det = detector.postprocess(pred, im.shape, im0.shape)
+    pred = pred.cpu().numpy()
+    det = det.cpu().numpy()
 
     input_img = im0.copy()
     kept_inputs, centers, scales = keypointer.preprocess(input_img, det)
