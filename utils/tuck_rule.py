@@ -1,10 +1,11 @@
 # Input으로 [1,17,3] 크기의 array가 들어옴
 
-def count_rule(coordinates, arm_stretch_angle=130, arm_between_angle=80, 
+def count_rule(coordinates, arm_stretch_angle=150, arm_between_angle=80, 
                             leg_stretch_angle=150, leg_between_angle=60):
     
     import numpy as np
     import pandas as pd
+    import cv2 
     
     IsArmStretch = 0 # 팔은 쭉 폈는가
     IsArmClose = 0 # 팔이 잘 벌려져 있는가
@@ -20,28 +21,26 @@ def count_rule(coordinates, arm_stretch_angle=130, arm_between_angle=80,
     joint_idx = {'left_arm':[5, 7, 9], 'right_arm':[6,8,10]}
     for k, v in joint_idx.items():
         first = coordinates[v[0]]
-        mid = coordinates[v[1]]
+        mid1 = coordinates[v[1]]
         end = coordinates[v[2]]
-        if 'right' in k:
-            dimension = 1 # < 각도
-        else:
-            dimension = -1 # > 각도
-        angle_tmp = calculate_angle2D_3point(first ,mid, end, dimension)
-        if angle_tmp >= arm_stretch_angle:
+
+        angle_tmp1, mid1 = calculate_angle2D_3point(first ,mid1, end)
+        if angle_tmp1 >= arm_stretch_angle:
             IsArmStretch = 1
         else:
             IsArmStretch = 0
             break
 
     # 1.2. 손목 - 목 - 손목
+    # ArmClose
     joint_idx = {'arm_between':[9, 5, 6, 10]}
     for k, v in joint_idx.items():
         first = coordinates[v[0]]
-        mid1 = coordinates[v[1]]
-        mid2 = coordinates[v[2]]
+        mid_1 = coordinates[v[1]]
+        mid_2 = coordinates[v[2]]
         end = coordinates[v[3]]
-        angle_tmp = calculate_angle2D_4point(first ,mid1, mid2, end, 1)
-        if angle_tmp <= arm_between_angle:
+        angle_tmp2, mid2 = calculate_angle2D_4point(first ,mid_1, mid_2, end)
+        if angle_tmp2 <= arm_between_angle:
             IsArmClose = 1
         else:
             IsArmClose = 0
@@ -52,14 +51,11 @@ def count_rule(coordinates, arm_stretch_angle=130, arm_between_angle=80,
     joint_idx = {'left_leg':[11, 13, 15], 'right_leg':[12, 14, 16]}
     for k, v in joint_idx.items():
         first = coordinates[v[0]]
-        mid = coordinates[v[1]]
+        mid3 = coordinates[v[1]]
         end = coordinates[v[2]]
-        if 'left' in k:
-            dimension = 1 
-        else:
-            dimension = -1
-        angle_tmp = calculate_angle2D_3point(first ,mid, end, dimension)
-        if angle_tmp >= leg_stretch_angle:
+
+        angle_tmp3, mid3 = calculate_angle2D_3point(first ,mid3, end)
+        if angle_tmp3 >= leg_stretch_angle:
             IsLegStretch = 1
         else:
             IsLegStretch = 0
@@ -69,11 +65,11 @@ def count_rule(coordinates, arm_stretch_angle=130, arm_between_angle=80,
     joint_idx = {'leg_between':[13, 11, 12, 14]} 
     for k, v in joint_idx.items():
         first = coordinates[v[0]]
-        mid1 = coordinates[v[1]]
-        mid2 = coordinates[v[2]]
+        mid_1 = coordinates[v[1]]
+        mid_2 = coordinates[v[2]]
         end = coordinates[v[3]]
-        angle_tmp = calculate_angle2D_4point(first ,mid1, mid2, end, -1)
-        if angle_tmp <= leg_between_angle:
+        angle_tmp4, mid4 = calculate_angle2D_4point(first ,mid_1, mid_2, end)
+        if angle_tmp4 <= leg_between_angle:
             IsLegClose = 1
         else:
             IsLegClose = 0
@@ -97,12 +93,12 @@ def count_rule(coordinates, arm_stretch_angle=130, arm_between_angle=80,
     bar_location = min(left_wrist,right_wrist)
     
     # 3.2. 예측 턱 위치
-    joint_idx = {'left_ear_nose':[3, 0], 'right_ear_nose':[4,0]} 
+    joint_idx = {'left_eye_nose':[1, 0], 'right_eye_nose':[2,0]} 
     expected_chin = []
     for k, v in joint_idx.items():
-        ear = coordinates[v[0]]
+        eye = coordinates[v[0]]
         nose = coordinates[v[1]]
-        expected_chin.append(calculate_chin(ear ,nose))
+        expected_chin.append(calculate_chin(eye ,nose))
     chin_location = min(expected_chin)[1]
     
     if chin_location <= bar_location:
@@ -117,89 +113,68 @@ def count_rule(coordinates, arm_stretch_angle=130, arm_between_angle=80,
                             'IsKneeStop' : [IsKneeStop],
                             'IsChinOver' : [IsChinOver]})
     
-    return result_tmp
-    
+    angle_list = [angle_tmp1, angle_tmp2, angle_tmp3, angle_tmp4]
+    mid_list = [map(int,mid1), map(int,mid2), map(int,mid3), map(int,mid4)]   
 
-def calculate_angle2D_3point(a, b, c, direction=-1):
-    """
-    calculate_angle2D is divided by left and right side because this function uses external product
-    input : a,b,c -> landmarks with shape [x,y,z,visibility]
-          direction -> int -1 or 1
-                      -1 means Video(photo) for a person's left side and 1 means Video(photo) for a person's right side
-    output : angle between vector ba and bc with range 0~360
-    """
+    return result_tmp, angle_list, mid_list
+
+
+def calculate_angle2D_3point(a, b, c):
+
     import numpy as np
-    # external product's z value
-    external_z = (b[0]-a[0])*(b[1]-c[1]) - (b[1]-a[1])*(b[0]-c[0])
 
     a = np.array(a[:2]) #first
     b = np.array(b[:2]) #mid
     c = np.array(c[:2]) #end
 
-    ba = b-a
-    bc = b-c
+    ba = a-b
+    bc = c-b
     dot_result = np.dot(ba, bc)
 
 
     ba_size = np.linalg.norm(ba)
     bc_size = np.linalg.norm(bc)
 
+    # 컴퓨팅 계산 오류 방지 clip
     radi_temp = np.clip(dot_result / (ba_size*bc_size), -1.0, 1.0)
     radi = np.arccos(radi_temp)
     angle = np.abs(radi*180.0/np.pi)
 
     
-    if external_z * direction > 0:
-        angle = 360 - angle
-    
-    return round(angle, 2)
+    return round(angle, 2), b
 
-def calculate_angle2D_4point(a, b1, b2, c, direction=-1):
-    """
-    calculate_angle2D is divided by left and right side because this function uses external product
-    input : a,b,c -> landmarks with shape [x,y,z,visibility]
-          direction -> int -1 or 1
-                      -1 means Video(photo) for a person's left side and 1 means Video(photo) for a person's right side
-    output : angle between vector ba and bc with range 0~360
-    """
+def calculate_angle2D_4point(a, b1, b2, c):
+
     import numpy as np
     b1 = np.array(b1[:2])
     b2 = np.array(b2[:2])
     
     b = [round(abs((b1[0]+b2[0])/2),2), round(abs((b1[1]+b2[1])/2),2)]
-    
-    # external product's z value
-    external_z = (b[0]-a[0])*(b[1]-c[1]) - (b[1]-a[1])*(b[0]-c[0])
 
     a = np.array(a[:2]) #first
     b = np.array(b[:2]) #mid
     c = np.array(c[:2]) #end
 
-    
-    ba = b-a
-    bc = b-c
+    ba = a-b
+    bc = c-b
     dot_result = np.dot(ba, bc)
 
     ba_size = np.linalg.norm(ba)
     bc_size = np.linalg.norm(bc)
     radi = np.arccos(dot_result / (ba_size*bc_size))
     angle = np.abs(radi*180.0/np.pi) # 60분법 변환
-
     
-    if external_z * direction > 0:
-        angle = 360 - angle
-    
-    return round(angle,2)
+    return round(angle,2), b
 
 def calculate_chin(a, b):
     import numpy as np
     chin_x = b[0]
-    a = np.array(a[1]) # ear,  y 좌표
+    a = np.array(a[1]) # eye,  y 좌표
     b = np.array(b[1]) # nose, y 좌표
     
-    ear_to_nose = abs(a-b)
+    eye_to_nose = abs(a-b)
     # x좌표는 nose, y좌표는 nose + 
-    chin = [chin_x, b+round(ear_to_nose*1.6,2)]
+    chin = [chin_x, b + round(eye_to_nose*1.618,2)]
     
     return chin
 

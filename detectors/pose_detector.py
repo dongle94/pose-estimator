@@ -46,6 +46,7 @@ def test():
     import time
     import cv2
     import pandas as pd
+    import numpy as np
     from detectors.obj_detector import HumanDetector
     from utils.config import _C as cfg
     from utils.config import update_config
@@ -56,7 +57,17 @@ def test():
     update_config(cfg, args='./configs/config.yaml')
     print(cfg)
 
-    result = pd.DataFrame()
+    result = pd.DataFrame({'IsArmStretch' : [], 
+                            'IsArmClose' : [],
+                            'IsLegStretch' : [],
+                            'IsLegClose' : [],
+                            'IsKneeStop' : [],
+                            'IsChinOver' : []})
+    frame_counter = -1
+    pullup_counter = 0
+    pullup_ready = 1
+    start = 0
+    
     obj_detector = HumanDetector(cfg=cfg)
     kept_detector = PoseDetector(cfg=cfg)
 
@@ -69,14 +80,21 @@ def test():
 
     while media_loader.cap.isOpened():
         frame = media_loader.get_frame()
+        width = int(media_loader.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(media_loader.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        
         if frame is None:
             break
+        else:
+            frame_counter += 1
 
         im = obj_detector.preprocess(frame)
         pred = obj_detector.detect(im)
         pred, det = obj_detector.postprocess(pred)
-
+        
         if det.size()[0]:
+            
+                        
             inps, centers, scales = kept_detector.preprocess(frame, det)
             # inps : [1,3,384,288] 이미지 데이터
             preds = kept_detector.detect(inps)
@@ -85,15 +103,36 @@ def test():
             # rets : [1,17,3] (관절당 히트맵 중)
             
             # 추가 
-            result_tmp = count_rule(rets[0])
+            result_tmp, angle_list, mid_list = count_rule(rets[0])
             # 결과 합침
             result = pd.concat([result, result_tmp])
+            # 시각화
+            # 어깨-팔꿈치-손목, 어깨-목-어깨, 고관절-무릎-발목, 무릎-허리-무릎
+            cv2.putText(frame, str(int(angle_list[0])),tuple(mid_list[0]),cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255,255,255),4,cv2.LINE_AA)
+            cv2.putText(frame, str(int(angle_list[1])),tuple(mid_list[1]),cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255,255,255),4,cv2.LINE_AA)
+            cv2.putText(frame, str(int(angle_list[2])),tuple(mid_list[2]),cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255,255,255),4,cv2.LINE_AA)
+            cv2.putText(frame, str(int(angle_list[3])),tuple(mid_list[3]),cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255,255,255),4,cv2.LINE_AA)
+            
+            # 상체 펴짐 연속 5 Frame 지속 
+            if result['IsArmStretch'].tail(5).sum() == 5 and result['IsArmClose'].tail(5).sum() == 5 and pullup_ready == 1:
+                start = 1
+                start_frame = frame_counter
+                pullup_ready = 0
+            
+                                   
+            # 상체 확인 후 턱이 봉을 넘는다면
+            if result['IsChinOver'].tail(5).sum() == 5 and start == 1:
+                # 올라올 때 다리가 80% 이상 붙어있는지 
+                if result['IsLegStretch'][start_frame:].mean() >= 0.8 and result['IsLegClose'][start_frame:].mean() >= 0.8 and result['IsKneeStop'][start_frame:].mean() >= 0.8:
+                    pullup_counter += 1
+                    start = 0
+                    pullup_ready = 1
+                    
+            print('풀업 횟수 : ', pullup_counter)
+            
         else:
             rets = None
-        
-        
-        # 손목
-        # print(rets[0][9][:2], rets[0][10][:2])
+
 
 
 
