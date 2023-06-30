@@ -196,15 +196,20 @@ def merge_heatmaps(heatmaps, boxes, img_size):
         x1, y1, x2, y2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
         box_w, box_h = x2 - x1, y2 - y1
 
-        # h = cv2.resize(h, (h.shape[1]*2, h.shape[0]*2))
+        # h = cv2.resize(h, (img_size[0], img_size[1]))
         h0, w0 = h.shape[:2]
         h = h[int(h0 * 0.1):int(h0 * 0.9), int(w0 * 0.1):int(w0 * 0.9)]
 
         h0, w0 = h.shape[:2]
         box_ratio = box_w / box_h
-        nw = h0 * box_ratio
-        k = int((w0 - nw) / 2)
-        h = h[:, k: w0 - k + 1]
+        if box_ratio < img_size[0] / img_size[1]:
+            nw = h0 * box_ratio
+            k = int((w0 - nw) / 2)
+            h = h[:, k: w0 - k + 1]
+        else:
+            nh = w0 / box_ratio
+            k = int((h0 - nh) / 2)
+            h = h[k: h0 - k +1, :]
 
         resize_h = cv2.resize(h, (box_w, box_h))
 
