@@ -1,6 +1,6 @@
 # Input으로 [1,17,3] 크기의 array가 들어옴
 
-def count_rule(coordinates, arm_stretch_angle=150, arm_between_angle=80, 
+def frame_check(coordinates, arm_stretch_angle=150, arm_between_angle=80, 
                             leg_stretch_angle=150, leg_between_angle=60):
     
     import numpy as np
@@ -178,10 +178,26 @@ def calculate_chin(a, b):
     
     return chin
 
+def visualize_angle(frame, angle_list, mid_list):
+    import cv2
+    
+    for angle, mid in zip(angle_list, mid_list):
+        cv2.putText(frame, str(int(angle)),tuple(mid),cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255,255,255),4,cv2.LINE_AA)
 
 
-
-
+'''
+def count_rule(result, start, start_frame, pullup_ready, pullup_counter, frame_counter, coordinates):
+    
+    if result['IsArmStretch'].tail(5).sum() == 5 and result['IsArmClose'].tail(5).sum() == 5 and pullup_ready == 1:
+                start = 1
+                start_frame = frame_counter
+                pullup_ready = 0
+                
+                
+def check_body_stretched(result, frame_count = 5):
+    result['IsArmStretch'].tail(frame_count).sum() == frame_count and result['IsArmClose'].tail(frame_count).sum() == frame_count
+                    
+'''
 
 
 

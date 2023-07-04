@@ -1,5 +1,6 @@
 import os
 import sys
+import numpy as np
 
 from pathlib import Path
 FILE = Path(__file__).resolve()
@@ -52,7 +53,7 @@ def test():
     from utils.config import update_config
     from utils.medialoader import MediaLoader
     from utils.visualization import vis_pose_result
-    from utils.tuck_rule import count_rule
+    from utils.tuck_rule import frame_check, visualize_angle
 
     update_config(cfg, args='./configs/config.yaml')
     print(cfg)
@@ -67,6 +68,7 @@ def test():
     pullup_counter = 0
     pullup_ready = 1
     start = 0
+    start_frame = 0
     
     obj_detector = HumanDetector(cfg=cfg)
     kept_detector = PoseDetector(cfg=cfg)
@@ -84,6 +86,7 @@ def test():
         height = int(media_loader.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         
         if frame is None:
+            logger.info("Frame is None -- Break main loop")
             break
         else:
             frame_counter += 1
@@ -94,7 +97,6 @@ def test():
         
         if det.size()[0]:
             
-                        
             inps, centers, scales = kept_detector.preprocess(frame, det)
             # inps : [1,3,384,288] 이미지 데이터
             preds = kept_detector.detect(inps)
@@ -102,24 +104,19 @@ def test():
             rets = kept_detector.postprocess(preds, centers, scales)
             # rets : [1,17,3] (관절당 히트맵 중)
             
-            # 추가 
-            result_tmp, angle_list, mid_list = count_rule(rets[0])
+            # Frame마다 체크 
+            result_tmp, angle_list, mid_list = frame_check(rets[0])
             # 결과 합침
             result = pd.concat([result, result_tmp])
-            # 시각화
-            # 어깨-팔꿈치-손목, 어깨-목-어깨, 고관절-무릎-발목, 무릎-허리-무릎
-            cv2.putText(frame, str(int(angle_list[0])),tuple(mid_list[0]),cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255,255,255),4,cv2.LINE_AA)
-            cv2.putText(frame, str(int(angle_list[1])),tuple(mid_list[1]),cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255,255,255),4,cv2.LINE_AA)
-            cv2.putText(frame, str(int(angle_list[2])),tuple(mid_list[2]),cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255,255,255),4,cv2.LINE_AA)
-            cv2.putText(frame, str(int(angle_list[3])),tuple(mid_list[3]),cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255,255,255),4,cv2.LINE_AA)
-            
+            # 시각화           
+            visualize_angle(frame, angle_list, mid_list)
+
             # 상체 펴짐 연속 5 Frame 지속 
             if result['IsArmStretch'].tail(5).sum() == 5 and result['IsArmClose'].tail(5).sum() == 5 and pullup_ready == 1:
                 start = 1
                 start_frame = frame_counter
                 pullup_ready = 0
-            
-                                   
+                                          
             # 상체 확인 후 턱이 봉을 넘는다면
             if result['IsChinOver'].tail(5).sum() == 5 and start == 1:
                 # 올라올 때 다리가 80% 이상 붙어있는지 
@@ -127,14 +124,16 @@ def test():
                     pullup_counter += 1
                     start = 0
                     pullup_ready = 1
-                    
-            print('풀업 횟수 : ', pullup_counter)
+                # 넘었는데 다리가 안붙어 있었다면 초기화
+                else:
+                    start = 0
+                    pullup_ready = 1
+            
+            logger.info(f'풀업 횟수 : {pullup_counter}')    
+            # print('풀업 횟수 : ', pullup_counter)
             
         else:
             rets = None
-
-
-
 
         for d in det:
             x1, y1, x2, y2 = map(int, d[:4])
@@ -144,16 +143,29 @@ def test():
 
         cv2.imshow('_', frame)
         if cv2.waitKey(1) == ord('q'):
-            print("-- CV2 Stop --")
+            logger.info("-- CV2 Stop by Keyboard Input --")
             break
 
         time.sleep(0.001)
     # 모든 Frame 결과 저장
     result.to_csv('result.csv', index=False)
     media_loader.stop()
-    print("-- Stop program --")
+    logger.info("-- Stop program --")
 
 
 
 if __name__ == "__main__":
+    
+    from utils.config import _C as _cfg
+    from utils.config import update_config
+    from utils.logger import init_logger, get_logger
+    
+    # get config
+    update_config(_cfg, args='./configs/config.yaml')
+    print(_cfg)
+
+    # get logger
+    init_logger(cfg=_cfg)
+    logger = get_logger()
+    
     test()

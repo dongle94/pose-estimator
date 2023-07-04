@@ -9,4 +9,15 @@ conda activate tuck
 cd /home/complexion/데이터바우처/pose-estimator/detectors
 
 2. Inference 실행 코드, 동영상 주소 넣어줌 
+
+# 정석 버전
 python3 pose_detector.py /home/complexion/데이터바우처/pose-estimator/data/videos/정석.mp4
+
+# 개구리
+python3 pose_detector.py /home/complexion/데이터바우처/pose-estimator/data/videos/개구리.mp4
+
+# 턱이 봉을 넘다 안넘다
+python3 pose_detector.py /home/complexion/데이터바우처/pose-estimator/data/videos/턱위치테스트.mp4
+
+# 팔쭉안펴짐
+python3 pose_detector.py /home/complexion/데이터바우처/pose-estimator/data/videos/팔쭉안펴짐.mp4
