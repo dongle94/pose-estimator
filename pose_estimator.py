@@ -13,7 +13,8 @@ from utils.medialoader import MediaLoader
 from detectors.obj_detector import HumanDetector
 from detectors.pose_detector import PoseDetector
 from utils.logger import init_logger, get_logger
-from utils.visualization import get_heatmaps, merge_heatmaps, vis_pose_result
+from utils.visualization import get_heatmaps, merge_heatmaps, vis_pose_result, get_rule_heatmaps
+from utils.coordinates import get_angle
 
 
 from utils.source import check_sources, YoloLoadStreams
@@ -32,7 +33,7 @@ class PoseEstimator(object):
         self.obj_detector = HumanDetector(cfg=_cfg)
         self.pose_detector = PoseDetector(cfg=_cfg)
 
-    def run(self, input_frame=None, heatmap=False):
+    def run(self, input_frame=None, heatmap=False, draw_index=[], color_map=None, rule=False):
         # get input
         if input_frame is None:
             input_frame = self.data_loader.get_frame()
@@ -51,17 +52,40 @@ class PoseEstimator(object):
             keys_rets = self.pose_detector.detect(inps)
             keys_preds, raw_heatmaps = self.pose_detector.postprocess(keys_rets, centers, scales)
 
+        # Process Rule
+        if rule is True and len(keys_preds):
+            color_map = {}
+            for batch in range(len(keys_preds)):
+                color_map[batch] = {}
+                for idx in draw_index:
+                    color_map[batch][idx] = cv2.COLORMAP_OCEAN
+            for batch, keys_pred in enumerate(keys_preds):
+                # 5,7,9 - right side / 6,8,10 - left side
+                for i in [7, 8]:
+                    angle = get_angle(keys_pred[i-2][:2], keys_pred[i][:2], keys_pred[i+2][:2])
+                    try:
+                        if 0 < angle < 90:
+                            color_map[batch][i] = cv2.COLORMAP_DEEPGREEN    #cv2.COLORMAP_OCEAN
+
+                        else:
+                            color_map[batch][i] = cv2.COLORMAP_HOT
+                    except:
+                        color_map[batch][i] = cv2.COLORMAP_OCEAN
+
         _heatmap = None
         if heatmap is True:
-            heatmaps = get_heatmaps(raw_heatmaps, colormap=None, draw_index=None)
+            if rule is True:
+                heatmaps = get_rule_heatmaps(raw_heatmaps, colormap=color_map, draw_index=draw_index)
+            else:
+                heatmaps = get_heatmaps(raw_heatmaps, colormap=color_map, draw_index=draw_index)
             _heatmap = merge_heatmaps(heatmaps, obj_dets, input_frame.shape)
 
         return obj_dets, keys_preds, _heatmap
 
-    def visualize(self, box=False, keypoint=False, heatmap=False):
+    def visualize(self, box=False, keypoint=False, heatmap=False, draw_index=[], color_map=None, rule=False):
         im0 = self.data_loader.get_frame()
-        boxes, keypoints, heatmaps = self.run(input_frame=im0, heatmap=True)
-
+        boxes, keypoints, heatmaps = self.run(input_frame=im0, heatmap=heatmap, draw_index=draw_index,
+                                              color_map=color_map, rule=rule)
         if box is True:
             for b in boxes:
                 x1, y1, x2, y2 = map(int, b[:4])
@@ -102,8 +126,8 @@ def main(args):
                                        (W, H))
 
     while pose_estimator.data_loader.cap.isOpened():
-        frame = pose_estimator.visualize(keypoint=True, heatmap=True)
-
+        frame = pose_estimator.visualize(box=True, keypoint=True, heatmap=True, draw_index=[7, 8],
+                                         color_map=None, rule=True)
         if args.save and video_writer is not None:
             video_writer.write(frame)
 
