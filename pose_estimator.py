@@ -37,6 +37,7 @@ class PoseEstimator(object):
         self.kpt_times = 0.
         self.rule_times = 0.
         self.heatmap_times = 0.
+        self.log_interval = _cfg.CONSOLE_LOG_INTERVAL
 
     def run(self, input_frame=None, heatmap=False, draw_index=[], color_map=None, rule=False):
         # get input
@@ -110,7 +111,7 @@ class PoseEstimator(object):
             self.heatmap_times += et - st
 
         # Logging
-        if self.f_cnt % 10 == 0:
+        if self.f_cnt % self.log_interval == 0:
             self.logger.debug(f"{self.f_cnt} Frames: det - {self.det_times / self.f_cnt:.4f} sec / "
                               f"kpt - {self.kpt_times / self.f_cnt:.4} sec / "
                               f"rule - {self.rule_times / self.f_cnt:.4f} sec / "
