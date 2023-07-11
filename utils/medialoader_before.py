@@ -9,27 +9,22 @@ import time
 IMG_FORMATS = 'bmp', 'dng', 'jpeg', 'jpg', 'mpo', 'png', 'tif', 'tiff', 'webp', 'pfm'       # include image suffixes
 VID_FORMATS = 'asf', 'avi', 'gif', 'm4v', 'mkv', 'mov', 'mp4', 'mpeg', 'mpg', 'ts', 'wmv'   # include video suffixes
 
-
-def check_sources(source):
+def check_sources(s):
     is_file, is_url, is_webcam = False, False, False
-    is_file = Path(source).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
-    is_url = source.lower().startswith(('rtsp://', 'rtmp://', 'http://', 'https://'))
-    is_webcam = source.isnumeric() or source.endswith('.streams') or (is_url and not is_file)
+    is_file = Path(s).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
+    is_url = s.lower().startswith(('rtsp://', 'rtmp://', 'http://', 'https://'))
+    is_webcam = s.isnumeric() or s.endswith('.streams') or (is_url and not is_file)
 
     return is_file, is_url, is_webcam
 
-
 class MediaLoader(object):
-    def __init__(self, source, stride=1, logger=None, realtime=False):
+    def __init__(self, source, save_result=False, save_path="", stride=1):
         self.stride = stride
-        self.realtime = realtime
         self.is_file, self.is_url, self.is_webcam = check_sources(source)
 
         source = os.path.abspath(source) if os.path.isfile(source) else source
         self.source = str(source)
         self.img, self.fps, self.frame, self.thread = None, 0, 0, None
-
-        self.logger = logger
 
         source = eval(source) if source.isnumeric() else source
         cap = cv2.VideoCapture(source)
@@ -43,28 +38,18 @@ class MediaLoader(object):
         self.fps = max((fps if math.isfinite(fps) else 0) % 100, 0) or 30  # 30 FPS fallback
         self.frame = max(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), 0) or float('inf')
 
-        _, self.img = cap.read()
+        _, self.imgs = cap.read()
 
         wait_ms = 1 / self.fps
         self.thread = Thread(target=self.update, args=([cap, source, wait_ms]), daemon=True)
         print(f"-- Success ({self.frame} frames {self.w}x{self.h} at {self.fps:.2f} FPS)")
         self.alive = True
-        self.bpause = False
-        self.start()
-
-    def start(self):
-        self.bpause = False
         self.thread.start()
+
 
     def update(self, cap, stream, wait_ms=0.01):
         n, f = 0, self.frame
         while cap.isOpened() and n < f and self.alive:
-            if self.bpause is True:
-                time.sleep(0.01)
-                continue
-            if self.realtime is False and self.img is not None:
-                time.sleep(0.001)
-                continue
             n += 1
             cap.grab()
             if n % self.stride == 0:
@@ -81,48 +66,23 @@ class MediaLoader(object):
         return True if self.img is not None else False
 
     def get_frame(self):
-        if self.realtime is False:
-            while self.img is None:
-                time.sleep(0.005)
-                continue
-        else:
-            if self.img is None:
-                return None
+        if self.img is None:
+            return None
         orig_im = self.img.copy()
-        if self.realtime is False:
-            self.img = None
         return orig_im
 
-    def show_frame(self, wait_sec: int = 0):
+    def show_frame(self, wait_sec:int=0):
         frame = self.get_frame()
         cv2.imshow("frame", frame)
         if cv2.waitKey(wait_sec) == ord('q'):
-            if self.logger is not None:
-               self.logger.info("-- Quit Show frames")
             raise StopIteration
 
     def stop(self):
         self.alive = False
-        if self.logger is not None:
-            self.logger.info("Stop Update thread")
         self.thread.join(timeout=1)
 
-    def pause(self):
-        self.bpause = True
-        if self.logger is not None:
-            self.logger.info("Pause Update thread")
-
-    def is_pause(self):
-        return self.bpause
-
-    def restart(self):
-        self.bpause = False
-        if self.logger is not None:
-            self.logger.info("Restart Update thread")
-
     def __del__(self):
-        if hasattr(self, 'cap'):
-            self.cap.release()
+        self.cap.release()
         cv2.destroyAllWindows()
 
 

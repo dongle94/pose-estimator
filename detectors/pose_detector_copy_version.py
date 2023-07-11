@@ -53,19 +53,30 @@ def test():
     from utils.config import update_config
     from utils.medialoader import MediaLoader
     from utils.visualization import vis_pose_result
-    from utils.tuck_rule import tuck_rule
+    from utils.tuck_rule import frame_check, visualize_angle
     from batch_face import RetinaFace
 
     
     update_config(cfg, args='./configs/config.yaml')
-    # print(cfg)
-    
-    tuck = tuck_rule()
+    print(cfg)
+
+    result = pd.DataFrame({'IsArmStretch' : [], 
+                            'IsArmClose' : [],
+                            'IsLegStretch' : [],
+                            'IsLegClose' : [],
+                            'IsKneeStop' : [],
+                            'IsChinOver' : []})
+    frame_counter = -1
+    pullup_counter = 0
+    pullup_ready = 1
+    start = 0
+    start_frame = 0
     
     obj_detector = HumanDetector(cfg=cfg)
     kept_detector = PoseDetector(cfg=cfg)
     face_detector = RetinaFace(gpu_id=0)
 
+    
     s = sys.argv[1]
     media_loader = MediaLoader(s)
 
@@ -74,16 +85,17 @@ def test():
         continue
 
     while media_loader.cap.isOpened():
-    
+        
         frame = media_loader.get_frame()
         width = int(media_loader.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(media_loader.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        end_con = height
             
         if frame is None:
             logger.info("Frame is None -- Break main loop")
             break
         else:
-            tuck.frame_count()
+            frame_counter += 1
 
         im = obj_detector.preprocess(frame)
         pred = obj_detector.detect(im)
@@ -99,25 +111,63 @@ def test():
             # rets : [1,17,3] (관절당 히트맵 중)
             
             # Frame마다 체크 
-            tuck.rule_check(frame, rets[0], face_detector)
-            # 상체 조건 5frame 연속 만족
-            tuck.upper_check()
-            # reset check
-            # tuck.upgoing_check()
-            # 종료 조건 확인
-            if tuck.break_check():
+            result_tmp, angle_list, mid_list, left_wrist_y = frame_check(rets[0])
+            # 결과 합침
+            result = pd.concat([result, result_tmp])
+            # 시각화           
+            visualize_angle(frame, angle_list, mid_list)
+
+            # 상체 펴짐 연속 5 Frame 지속 
+            if result['IsArmStretch'].tail(5).sum() == 5 and result['IsArmClose'].tail(5).sum() == 5 and pullup_ready == 1:
+                start = 1
+                start_frame = frame_counter
+                pullup_ready = 0
+                end_con = mid_list[0][1]
+                # 종료조건을 주기 위해 첫 풀업을 하고 난 뒤의 팔꿈치 위치를 저장
+                #if pullup_counter==1 :
+                    #end_con = mid_list[0][1]
+
+            # 종료 조건
+            if left_wrist_y >= end_con:
                 logger.info("-- Hand Off from Bar --")
                 break
-            # 하체 조건 확인
-            tuck.lower_check()
+                                          
+            # 상체 확인 후 턱이 봉을 넘는다면
+            if result['IsChinOver'].tail(5).sum() == 5 and start == 1:
+                # 올라올 때 다리가 80% 이상 붙어있는지 
+                if result['IsLegStretch'][start_frame:].mean() >= 0.8 and result['IsLegClose'][start_frame:].mean() >= 0.8 and result['IsKneeStop'][start_frame:].mean() >= 0.8:
+                    pullup_counter += 1
+                    start = 0
+                    pullup_ready = 1
+                    logger.info(f'Frame {frame_counter}에 풀업 횟수 : {pullup_counter}')
+                # 넘었는데 다리가 안붙어 있었다면 초기화
+                else:
+                    start = 0
+                    pullup_ready = 1
+                    logger.info(f'Frame {start_frame} ~ {frame_counter}에 다리가 안붙어있음')
+                            
+            # print('풀업 횟수 : ', pullup_counter)
             
         else:
             rets = None
+
+
+        # face detection
+        try:
+            faces = face_detector(frame, cv=True)
+            face_box, landmarks, score = faces[0]
+            print(face_box, landmarks, score)
+            cv2.rectangle(frame, (int(face_box[0]), int(face_box[1])), (int(face_box[2]), int(face_box[3])), (255, 0,0), 3 )
+        except:
+            pass
+        
         
         for d in det:
             x1, y1, x2, y2 = map(int, d[:4])
             cv2.rectangle(frame, (x1, y1), (x2, y2), (96, 96, 216), thickness=2, lineType=cv2.LINE_AA)
-
+        
+        # face
+        #cv2.rectangle(frame, (int(face_box[0]), int(face_box[1])), (int(face_box[2]), int(face_box[3])), (255, 0,0), 3 )
 
         if rets is not None:
             frame = vis_pose_result(model=None, img=frame, result=rets)
@@ -130,7 +180,7 @@ def test():
         
         time.sleep(0.001)
     # 모든 Frame 결과 저장
-    tuck.save_result()
+    result.to_csv('result.csv', index=False)
     media_loader.stop()
     logger.info("-- Stop program --")
 

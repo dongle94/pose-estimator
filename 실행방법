@@ -21,3 +21,25 @@ python3 pose_detector.py /home/complexion/데이터바우처/pose-estimator/data
 
 # 팔쭉안펴짐
 python3 pose_detector.py /home/complexion/데이터바우처/pose-estimator/data/videos/팔쭉안펴짐.mp4
+
+
+class 만들어서
+coordinate를 입력으로 받고
+
+만들 함수
+1. 해당 coordinate csv로 저장
+2. 해당 coordinate rule-based 판단 (이 때 판단 근거가 되는 각도, 길이는 argument로)
+3. rule-based 판단한 결과 csv 저장
+4. 판단한 결과를 저장한 csv를 불러와 rule 판단 후 pull up 횟수 저장 (csv가 아니라 self.df로 판단하면 될듯)
+5. 이 때 발생할 수 있는 실격요소들 판단 
+6. 종료요건 판단
+(처음 Counting이 +1되는 순간의 팔꿈치 위치를 기준으로 설정)
+(손목의 y좌표가 해당 위치보다 높아졌을 때 종료되었다고 판단 )
+
+개구리 수정 필요! 
+
+
+기존 파이썬 버전 Python 3.11.3
+
+# batch face
+https://github.com/elliottzheng/batch-face/tree/master
