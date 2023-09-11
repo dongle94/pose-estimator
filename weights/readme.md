@@ -26,12 +26,15 @@ If, you download configuration file and wiehgt like the following structure,
 ```commandline
 .(pose-estimator)
 ├── ...
+├── configs
+│   ├── hrnet_coco_w32_256x192.yaml
+│   └── hrnet_mpii_w32_256x256.yaml
 ├── tools
 │   └── hrnet_merge_model.py
 └── weights
-    ├── pose_hrnet_w32_256x192.pth
-    ├── readme.md
-    └── w32_256x192_adam_lr1e-3.yaml
+    ├── hrnet_coco_w32_256x192.pth
+    ├── hrnet_mpii_w32_256x256.pth
+    └── readme.md
 ```
 You can run as follows.
 
@@ -39,8 +42,8 @@ You can run as follows.
 # path is fixed at repository root path you run script anywhere.
 
 $ python hrnet_merge_model.py \
-  -c ./weights/w32_256x192_adam_lr1e-3.yaml \
-  -w ./weights/pose_hrnet_w32_256x192.pth \
-  -s ./weights/hrnet_merge_w32_256x192.pth
+  -c ./configs/hrnet_coco_w32_256x192.yaml \
+  -w ./weights/hrnet_coco_w32_256x192.pth \
+  -s ./weights/hrnet_coco_merge_w32_256x192.pth
 ```
 
