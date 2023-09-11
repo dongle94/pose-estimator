@@ -8,6 +8,13 @@ _C = CN()
 # Envrionments
 _C.DEVICE = None
 
+# Media
+_C.MEDIA_SOURCE = "0"
+_C.MEDIA_OPT_AUTO = True
+_C.MEDIA_WIDTH = 1280
+_C.MEDIA_HEIGHT = 720
+_C.MEDIA_FPS = 30
+
 # Object Detector
 _C.IMG_SIZE = 640
 _C.DET_MODEL_TYPE = ""
