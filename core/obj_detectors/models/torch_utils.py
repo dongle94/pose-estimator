@@ -1,7 +1,13 @@
+import os
 import torch
 import torch.nn as nn
 from pathlib import Path
 from copy import deepcopy
+
+try:
+    import thop  # for FLOPs computation
+except ImportError:
+    thop = None
 
 
 def fuse_conv_and_bn(conv, bn):
@@ -51,3 +57,21 @@ def model_info(model, verbose=False, imgsz=640):
 
     name = Path(model.yaml_file).stem.replace('yolov5', 'YOLOv5') if hasattr(model, 'yaml_file') else 'Model'
     print(f'{name} summary: {len(list(model.modules()))} layers, {n_p} parameters, {n_g} gradients{fs}')
+
+
+def select_device(device=''):
+    device = str(device).strip().lower().replace('cuda', '').replace('none', '')
+    cpu = device == 'cpu'
+    if cpu:
+        os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+    elif device:  # non-cpu device requested
+        os.environ[
+            'CUDA_VISIBLE_DEVICES'] = device  # set environment variable - must be before assert is_available()
+
+    if not cpu and torch.cuda.is_available():
+        device = device if device else '0'
+        arg = 'cuda:0'
+    else:
+        arg = 'cpu'
+
+    return torch.device(arg)

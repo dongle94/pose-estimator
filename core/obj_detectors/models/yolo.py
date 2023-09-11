@@ -12,6 +12,13 @@ import math
 import platform
 import sys
 from copy import deepcopy
+import cv2
+import time
+import numpy as np
+import torch
+import torch.nn as nn
+import torchvision
+
 from pathlib import Path
 
 FILE = Path(__file__).resolve()
@@ -21,20 +28,8 @@ if str(ROOT) not in sys.path:
 if platform.system() != 'Windows':
     ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
-import cv2
-import time
-import numpy as np
-import torch
-import torch.nn as nn
-import torchvision
 from models.common import *
 from models.torch_utils import fuse_conv_and_bn, model_info
-# from models.experimental import *
-# from utils.autoanchor import check_anchor_order
-# from utils.general import, check_version, check_yaml, print_args
-# from utils.plots import feature_visualization
-# from utils.torch_utils import (, initialize_weights, , profile, scale_img,
-#                                select_device, time_sync)
 
 try:
     import thop  # for FLOPs computation

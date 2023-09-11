@@ -3,13 +3,13 @@
 Common modules
 """
 
-import json
+import os
+import sys
 import math
+import platform
 import warnings
-from collections import OrderedDict, namedtuple
 from copy import copy
-from pathlib import Path
-from urllib.parse import urlparse
+# from urllib.parse import urlparse
 
 import cv2
 import numpy as np
@@ -17,6 +17,14 @@ import pandas as pd
 import torch
 import torch.nn as nn
 from PIL import Image
+
+from pathlib import Path
+FILE = Path(__file__).resolve()
+ROOT = FILE.parents[1]  # YOLOv5 root directory
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))  # add ROOT to PATH
+if platform.system() != 'Windows':
+    ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
 # from utils.dataloaders import exif_transpose, letterbox
 # from utils.general import (LOGGER, Profile, check_suffix, colorstr,
