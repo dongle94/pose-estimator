@@ -11,10 +11,10 @@ OBJ_CLASSES: [0]
 
 # Keypoint Detector
 KEPT_MODEL_TYPE: "hrnet"
-KEPT_MODEL_PATH: './weights/hrnet_coco_w32_256x192.pth'
-KEPT_MODEL_CNF: "./configs/hrnet_coco_w32_256x192.yaml"
+KEPT_MODEL_PATH: './weights/hrnet_mpii_w32_256x256.pth'
+KEPT_MODEL_CNF: "./configs/hrnet_mpii_w32_256x256.yaml"
 KEPT_HALF: false
-KEPT_IMG_SIZE: [192, 256]
+KEPT_IMG_SIZE: [256, 256]
 
 
 # Logger

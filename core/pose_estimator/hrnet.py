@@ -283,10 +283,10 @@ if __name__ == "__main__":
     detector = YoloDetector(weight='./weights/yolov5s.pt', device=0, img_size=640, fp16=True)
     detector.warmup()
 
-    keypointer = HRNet(weight="./weights/hrnet_coco_w32_256x192.pth",
-                       weight_cfg="./configs/hrnet_coco_w32_256x192.yaml",
-                       device='0', fp16=True, img_size=(192, 256))
-    keypointer.warmup((1, 3, 256, 192))
+    keypointer = HRNet(weight="./weights/hrnet_mpii_w32_256x256.pth",
+                       weight_cfg="./configs/hrnet_mpii_w32_256x256.yaml",
+                       device='0', fp16=True, img_size=(256, 256))
+    keypointer.warmup((1, 3, 256, 256))
 
     img = cv2.imread('./data/images/army.jpg')
     im, im0 = detector.preprocess(img)
