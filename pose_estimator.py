@@ -5,20 +5,16 @@ import numpy as np
 import cv2
 import time
 from datetime import datetime
-# from pathlib import Path
 
 from utils.config import _C as cfg
 from utils.config import update_config
 from utils.logger import init_logger, get_logger
 
 from utils.medialoader import MediaLoader
-from detectors.obj_detector import HumanDetector
-from detectors.pose_detector import PoseDetector
+from core.obj_detectors import ObjectDetector
+from core.pose_estimator import PoseDetector
 from utils.visualization import get_heatmaps, merge_heatmaps, vis_pose_result, get_rule_heatmaps
 from utils.coordinates import get_angle
-
-
-from utils.source import check_sources, YoloLoadStreams
 
 
 class PoseEstimator(object):
@@ -27,7 +23,7 @@ class PoseEstimator(object):
 
         self.data_loader = MediaLoader(source)
 
-        self.obj_detector = HumanDetector(cfg=_cfg)
+        self.obj_detector = ObjectDetector(cfg=_cfg)
         self.pose_detector = PoseDetector(cfg=_cfg)
 
         # debug log variable
