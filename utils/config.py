@@ -20,6 +20,11 @@ _C.IMG_SIZE = 640
 _C.DET_MODEL_TYPE = ""
 _C.DET_MODEL_PATH = ""
 _C.HALF = False
+_C.OBJ_CLASSES = None
+_C.CONF_THRES = 0.5
+_C.NMS_IOU = 0.45
+_C.AGNOSTIC_NMS = True
+_C.MAX_DET = 100
 
 
 # Keypoint Detector
