@@ -9,7 +9,7 @@ from torchvision import transforms
 
 from pathlib import Path
 FILE = Path(__file__).resolve()
-ROOT = FILE.parents[1]
+ROOT = FILE.parents[2]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 os.chdir(ROOT)
@@ -21,11 +21,12 @@ class HRNet(nn.Module):
 
         device = "cpu" if device == "" else device
         self.device = self.select_device(device)
+        self.cuda = torch.cuda.is_available() and device
         if weight_cfg == "":
             model = torch.load(weight).to(self.device).eval()
         else:
-            from detectors.hrnet_config import _C as _cfg
-            from pose_hrnet import PoseHighResolutionNet
+            from core.pose_estimator.hrnet_config import _C as _cfg
+            from core.pose_estimator.pose_hrnet import PoseHighResolutionNet
             _cfg.defrost()
             _cfg.merge_from_file(weight_cfg)
             _cfg.freeze()
@@ -44,8 +45,8 @@ class HRNet(nn.Module):
         ])
 
     def warmup(self, imgsz=(1, 3, 384, 288)):
-        im = torch.empty(*imgsz, dtype=torch.half if self.fp16 else torch.float, device=self.device)  # input
-        self.forward(im)
+        _im = torch.empty(*imgsz, dtype=torch.half if self.fp16 else torch.float, device=self.device)  # input
+        self.infer(_im)
         print("-- HRNet warmup -- ")
 
     def preprocess(self, im, boxes):
@@ -86,7 +87,7 @@ class HRNet(nn.Module):
 
         return inputs, centers, scales
 
-    def forward(self, inputs):
+    def infer(self, inputs):
         output = self.model(inputs)
         return output
 
@@ -122,7 +123,6 @@ class HRNet(nn.Module):
             )
         preds = np.concatenate((preds, maxvals), axis=2)
         return preds, batch_heatmaps
-
 
     @staticmethod
     def select_device(device=''):
@@ -278,41 +278,39 @@ class HRNet(nn.Module):
 
 
 if __name__ == "__main__":
-    from detectors.yolov5_pt import YoloDetector
+    from core.obj_detectors.yolov5_pt import YoloDetector
     from utils.visualization import vis_pose_result, get_heatmaps, merge_heatmaps
-    detector = YoloDetector(weight='./weights/yolov5n.pt', device=0, img_size=640, fp16=True)
+    detector = YoloDetector(weight='./weights/yolov5s.pt', device=0, img_size=640, fp16=True)
     detector.warmup()
 
-    keypointer = HRNet(weight="./weights/hrnet_merge_w48_384x288.pth",
-                       weight_cfg="",
-                       device=0, fp16=True, img_size=(288, 384))
-    keypointer.warmup()
+    keypointer = HRNet(weight="./weights/hrnet_coco_w32_256x192.pth",
+                       weight_cfg="./configs/hrnet_coco_w32_256x192.yaml",
+                       device='0', fp16=True, img_size=(192, 256))
+    keypointer.warmup((1, 3, 256, 192))
 
     img = cv2.imread('./data/images/army.jpg')
     im, im0 = detector.preprocess(img)
-    pred = detector.forward(im)
-    pred, det = detector.postprocess(pred, im.shape, im0.shape)
-    pred = pred.cpu().numpy()
-    det = det.cpu().numpy()
+    pred = detector.infer(im)
+    _pred, _det = detector.postprocess(pred, im.shape, im0.shape)
 
     input_img = im0.copy()
-    kept_inputs, centers, scales = keypointer.preprocess(input_img, det)
-    kept_pred = keypointer.forward(kept_inputs)
+    kept_inputs, centers, scales = keypointer.preprocess(input_img, _det)
+    kept_pred = keypointer.infer(kept_inputs)
     kept_pred, raw_heatmaps = keypointer.postprocess(kept_pred, np.asarray(centers), np.asarray(scales))
 
     # process heatmap
-    heatmaps = get_heatmaps(raw_heatmaps, colormap=None)
-    heatmap = merge_heatmaps(heatmaps, det, im0.shape)
+    heatmaps = get_heatmaps(raw_heatmaps, colormap=cv2.COLORMAP_JET)
+    heatmap = merge_heatmaps(heatmaps, _det, im0.shape)
 
-    for d in det:
+    for d in _det:
         x1, y1, x2, y2 = map(int, d[:4])
         cv2.rectangle(im0, (x1, y1), (x2, y2), (128, 128, 240), thickness=2, lineType=cv2.LINE_AA)
-    im0 = vis_pose_result(model=None, img=im0, result=kept_pred)
-    cv2.imshow('_', im0)
+    # im0 = vis_pose_result(model=None, img=im0, result=kept_pred)
+    cv2.imshow('original', im0)
 
     if len(heatmap.shape) == 2:
         heatmap = np.uint8(255 * heatmap)
         heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_HOT)
     new_heatmap = cv2.add((0.4 * heatmap).astype(np.uint8), im0)
-    cv2.imshow("+", new_heatmap)
+    cv2.imshow("heatmap", new_heatmap)
     cv2.waitKey(0)
