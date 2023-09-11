@@ -10,7 +10,7 @@ if str(ROOT) not in sys.path:
 os.chdir(ROOT)
 
 
-class PoseEstimator(object):
+class PoseDetector(object):
     def __init__(self, cfg=None):
         self.cfg = cfg
 
@@ -69,7 +69,7 @@ if __name__ == "__main__":
 
     # get detectors
     obj_detector = ObjectDetector(cfg=_cfg)
-    kept_detector = PoseEstimator(cfg=_cfg)
+    kept_detector = PoseDetector(cfg=_cfg)
 
     # get media loader by params
     s = sys.argv[1]
