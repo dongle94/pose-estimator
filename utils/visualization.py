@@ -216,3 +216,30 @@ def merge_heatmaps(heatmaps, boxes, img_size):
         new_heatmap[y1:y2, x1:x2] = resize_h
         heatmap = np.maximum(heatmap, new_heatmap)
     return heatmap
+
+
+def get_rule_heatmaps(batch_heatmaps, colormap=None, draw_index: list = None):
+    heatmaps = []
+    if type(draw_index) == list and len(draw_index) == 0:
+        draw_index = None
+    if len(batch_heatmaps.shape) == 3:
+        batch_heatmaps = [batch_heatmaps]
+
+    for batch, _heatmaps in enumerate(batch_heatmaps):
+        if colormap is not None:
+            new_heatmap = np.zeros((_heatmaps.shape[1], _heatmaps.shape[2], 3), dtype=np.float32)
+        else:
+            new_heatmap = np.zeros((_heatmaps.shape[1], _heatmaps.shape[2]), dtype=np.float32)
+        for idx, heatmap in enumerate(_heatmaps):
+            if draw_index is not None and idx not in draw_index:
+                continue
+
+            if colormap is not None:
+                heatmap = cv2.cvtColor(heatmap, cv2.COLOR_GRAY2BGR)
+                heatmap = heatmap * 255
+                heatmap = cv2.applyColorMap(heatmap.astype(np.uint8), colormap[batch][idx])
+
+
+            new_heatmap = np.maximum(new_heatmap, heatmap)
+        heatmaps.append(new_heatmap)
+    return heatmaps

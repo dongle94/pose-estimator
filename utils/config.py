@@ -26,6 +26,7 @@ _C.KEPT_IMG_SIZE = [288, 384]
 # Logger
 _C.LOG_LEVEL = 'DEBUG'
 _C.CONSOLE_LOG = False
+_C.CONSOLE_LOG_INTERVAL = 10
 _C.LOGGER_NAME = ""
 _C.FILE_LOG = False
 _C.LOG_FILE_DIR = './log/'

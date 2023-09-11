@@ -4,8 +4,9 @@ psutil
 requests>=2.23.0
 scipy==1.9.3
 pandas>=1.1.4
-numpy
+numpy~=1.19
 opencv-python==4.5.4.60
-torch
-torchvision
+--index-url https://download.pytorch.org/whl/cu117
+torch==2.0.1
+torchvision==0.15.2
 Pillow
