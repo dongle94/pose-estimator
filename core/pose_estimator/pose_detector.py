@@ -9,6 +9,8 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 os.chdir(ROOT)
 
+from utils.logger import get_logger
+
 
 class PoseDetector(object):
     def __init__(self, cfg=None):
@@ -39,17 +41,17 @@ class PoseDetector(object):
 
     def preprocess(self, img, boxes):
         # boxes coords are ltrb
-        inp, centers, scales = self.detector.preprocess(img, boxes)
-        return inp, centers, scales
+        inp, _centers, _scales = self.detector.preprocess(img, boxes)
+        return inp, _centers, _scales
 
     def detect(self, inputs):
-        preds = self.detector.infer(inputs)
+        _preds = self.detector.infer(inputs)
 
-        return preds
+        return _preds
 
     def postprocess(self, _preds, _centers, _scales):
-        preds, raw_heatmaps = self.detector.postprocess(_preds, _centers, _scales)
-        return preds, raw_heatmaps
+        _preds, _raw_heatmaps = self.detector.postprocess(_preds, _centers, _scales)
+        return _preds, _raw_heatmaps
 
 
 if __name__ == "__main__":
@@ -57,7 +59,7 @@ if __name__ == "__main__":
     import cv2
     from utils.config import _C as _cfg
     from utils.config import update_config
-    from utils.logger import init_logger, get_logger
+    from utils.logger import init_logger
     from core.obj_detectors import ObjectDetector
     from utils.medialoader import MediaLoader
     from utils.visualization import vis_pose_result, get_heatmaps, merge_heatmaps
