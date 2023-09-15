@@ -1,0 +1,30 @@
+# Environments
+DEVICE: 0
+
+
+# Object Detector
+DET_MODEL_TYPE: "yolo"
+DET_MODEL_PATH: './weights/yolov5x6.pt'
+IMG_SIZE: 1280
+HALF: false
+OBJ_CLASSES: [0]
+
+# Keypoint Detector
+KEPT_MODEL_TYPE: "hrnet"
+KEPT_MODEL_PATH: './weights/hrnet_mpii_w32_256x256.pth'
+KEPT_MODEL_CNF: "./configs/hrnet_mpii_w32_256x256.yaml"
+KEPT_HALF: false
+KEPT_IMG_SIZE: [256, 256]
+
+
+# Logger
+LOG_LEVEL: 'debug'
+CONSOLE_LOG: true
+CONSOLE_LOG_INTERVAL: 50
+LOGGER_NAME: "LABEL"
+FILE_LOG: true
+LOG_FILE_DIR: './log/'
+LOG_FILE_COUNTER: 10
+LOG_FILE_ROTATE_TIME: "D"
+LOG_FILE_ROTATE_INTERVAL: 1
+
