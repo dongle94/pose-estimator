@@ -20,7 +20,6 @@ from core.obj_detectors import ObjectDetector
 from core.pose_estimator import PoseDetector
 
 
-
 def main(opt):
     logger = get_logger()
     logger.info(f"Start dv6 annotation script.")
@@ -33,7 +32,7 @@ def main(opt):
     # create csv
     if not os.path.exists(os.path.join(os.getcwd(), 'result')):
         os.makedirs(os.path.join(os.getcwd(), 'result'))
-    csv_file = open(os.path.join(os.getcwd(), 'result', 'dv63.csv'), 'a+', newline='')
+    csv_file = open(os.path.join(os.getcwd(), opt.output), 'a+', newline='')
     cw = csv.writer(csv_file)
 
     # inputs analysis loop
@@ -89,7 +88,7 @@ def main(opt):
                         x, y = int(r[0]), int(r[1])
                         cv2.circle(frame, (x, y), 3, (16, 16, 240), -1)
                         ax, ay = x - x1, y-y1
-                        rx, ry = format(ax / w, '.6f'), format(ay / h, '.6f')
+                        rx, ry = min(max(ax / w, 0), 1), min(max(ay / h, 0), 1)
                         dv6_list.append(rx)
                         dv6_list.append(ry)
 
@@ -126,6 +125,8 @@ def args_parse():
                         help='input video files')
     parser.add_argument('-l', '--label', default=0, type=int,
                         help='classification label')
+    parser.add_argument('-o', '--output', default='./result/dv6.csv',
+                        help='output csv file path')
     parser.add_argument('-c', '--config', default='./configs/dv6_annotate.yaml',
                         help="annotation configuration yaml file path")
     _args = parser.parse_args()
