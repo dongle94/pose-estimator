@@ -36,7 +36,9 @@ def main(opt):
     cw = csv.writer(csv_file)
 
     # inputs analysis loop
+    seen = set()
     for input_video in inputs:
+        print("Process Video: ", input_video)
         media_loader = MediaLoader(input_video,
                                    logger=logger,
                                    realtime=False,
@@ -78,7 +80,7 @@ def main(opt):
                 x1, y1, x2, y2 = map(int, d[:4])
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (96, 96, 216), thickness=2, lineType=cv2.LINE_AA)
 
-            if len(det) == len(rets):
+            if det is not None and rets is not None and len(det) == len(rets):
                 for i, ret in enumerate(rets):
                     _ret = [r for idx, r in enumerate(ret) if idx in [6, 7, 8, 9, 12, 13]]
                     x1, y1, x2, y2 = map(int, det[i][:4])
@@ -91,7 +93,9 @@ def main(opt):
                         rx, ry = min(max(ax / w, 0), 1), min(max(ay / h, 0), 1)
                         dv6_list.append(rx)
                         dv6_list.append(ry)
-
+                    if str(dv6_list) in seen:
+                        continue  # skip duplicate
+                    seen.add(str(dv6_list))
                     dv6_list.append(opt.label)
                     cw.writerow(dv6_list)
                     dv6_list.clear()
