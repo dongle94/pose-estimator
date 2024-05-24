@@ -1,18 +1,43 @@
 # Environments
-DEVICE: 0
+ENV:
+  DEVICE: cuda     # cuda, cpu
+  GPU_NUM: 0
 
+# Media
+MEDIA:
+  SOURCE: 0
+  OPT_AUTO: False
+  FOURCC: "MJPG"
+  WIDTH: 1280
+  HEIGHT: 720
+  FPS: 30
+  REALTIME: False
+  BGR: True
 
 # Object Detector
-DET_MODEL_TYPE: "yolo"
-DET_MODEL_PATH: './weights/yolov5s.pt'
-IMG_SIZE: 640
-HALF: false
-OBJ_CLASSES: [0]
+DET:
+  MODEL_TYPE: yolov8
+  DET_MODEL_PATH: './weights/yolov8/yolov8m.pt'
+  HALF: False
+  CONF_THRES: 0.5
+  OBJ_CLASSES: [0]
+
+YOLOV5:
+  IMG_SIZE: 640
+  NMS_IOU: 0.45
+  AGNOSTIC_NMS: True
+  MAX_DET: 100
+
+YOLOV8:
+  IMG_SIZE: 640
+  NMS_IOU: 0.45
+  AGNOSTIC_NMS: False
+  MAX_DET: 100
 
 # Keypoint Detector
 KEPT_MODEL_TYPE: "hrnet"
-KEPT_MODEL_PATH: './weights/hrnet_mpii_w32_256x256.pth'
-KEPT_MODEL_CNF: "./configs/hrnet_mpii_w32_256x256.yaml"
+KEPT_MODEL_PATH: './weights/hrnet_coco_w32_256x192.pth'
+KEPT_MODEL_CNF: "./configs/hrnet_coco_w32_256x192.yaml"
 KEPT_HALF: false
 KEPT_IMG_SIZE: [256, 256]
 
