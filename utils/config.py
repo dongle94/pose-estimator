@@ -45,6 +45,17 @@ def set_config(file):
     config.yolov8_agnostic_nms = _config['YOLOV8']['AGNOSTIC_NMS']
     config.yolov8_max_det = _config['YOLOV8']['MAX_DET']
 
+    # Logger
+    config.log_level = _config['LOG']['LOG_LEVEL']
+    config.logger_name = _config['LOG']['LOGGER_NAME']
+    config.console_log = _config['LOG']['CONSOLE_LOG']
+    config.console_log_interval = _config['LOG']['CONSOLE_LOG_INTERVAL']
+    config.file_log = _config['LOG']['FILE_LOG']
+    config.file_log_dir = _config['LOG']['FILE_LOG_DIR']
+    config.file_log_counter = _config['LOG']['FILE_LOG_COUNTER']
+    config.file_log_rotate_time = _config['LOG']['FILE_LOG_ROTATE_TIME']
+    config.file_log_rotate_interval = _config['LOG']['FILE_LOG_ROTATE_INTERVAL']
+
 
 def get_config():
     return config

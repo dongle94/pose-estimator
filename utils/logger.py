@@ -7,7 +7,7 @@ import os
 logger = None
 
 
-def init_logger(cfg=None, name="empty_logger", filename="", loglevel="debug"):
+def init_logger(cfg=None, name="default", filename="", loglevel="debug"):
     # LOG FORMATTING
     # https://docs.python.org/ko/3.8/library/logging.html#logrecord-attributes
     log_format = "[%(asctime)s]-[%(levelname)s]-[%(name)s]-[%(module)s](%(process)d): %(message)s"
@@ -15,15 +15,15 @@ def init_logger(cfg=None, name="empty_logger", filename="", loglevel="debug"):
 
     if cfg is not None:
         # LOGGER NAME
-        name = cfg.LOGGER_NAME if cfg.LOGGER_NAME else "logger"
+        name = cfg.logger_name if cfg.logger_name else name
         _logger = logging.getLogger(name)
 
         # LOG LEVEL
-        log_level = cfg.LOG_LEVEL.upper() if cfg.LOG_LEVEL else "DEBUG"
+        log_level = cfg.log_level.upper() if cfg.log_level else loglevel.upper()
         _logger.setLevel(log_level)
 
         # LOG CONSOLE
-        if cfg.CONSOLE_LOG is True:
+        if cfg.console_log is True:
             _handler = StreamHandler()
             _handler.setLevel(log_level)
 
@@ -33,19 +33,19 @@ def init_logger(cfg=None, name="empty_logger", filename="", loglevel="debug"):
             _logger.addHandler(_handler)
 
         # LOG FILE
-        if cfg.FILE_LOG is True:
-            filename = os.path.join(cfg.LOG_FILE_DIR, cfg.LOGGER_NAME + '.log')
+        if cfg.file_log is True:
+            filename = os.path.join(cfg.file_log_dir, cfg.logger_name + '.log')
             logdir = os.path.dirname(filename)
             if not os.path.exists(logdir):
                 os.makedirs(logdir)
 
-            when = cfg.LOG_FILE_ROTATE_TIME if hasattr(cfg, "LOG_FILE_ROTATE_TIME") else "D"
-            interval = cfg.LOG_FILE_ROTATE_INTERVAL if hasattr(cfg, "LOG_FILE_ROTATE_INTERVAL") else 1
+            when = cfg.file_log_rotate_time if hasattr(cfg, "file_log_rotate_time") else "D"
+            interval = cfg.file_log_rotate_interval if hasattr(cfg, "file_log_rotate_interval") else 1
             _handler = TimedRotatingFileHandler(
                 filename=filename,
                 when=when,
                 interval=interval,
-                backupCount=cfg.LOG_FILE_COUNTER,
+                backupCount=cfg.file_log_counter,
                 encoding='utf8'
             )
             _handler.setLevel(log_level)
