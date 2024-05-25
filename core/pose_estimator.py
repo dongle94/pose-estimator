@@ -1,10 +1,8 @@
 import os
 import sys
 import numpy as np
-
-from pathlib import Path
-
 import torch
+from pathlib import Path
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]
@@ -96,6 +94,7 @@ class PoseEstimator(object):
 
         return kept_pred, raw_heatmaps
 
+
 if __name__ == "__main__":
     import cv2
     import time
@@ -103,6 +102,7 @@ if __name__ == "__main__":
     from core.media_loader import MediaLoader
     from utils.logger import init_logger
     from utils.config import set_config, get_config
+    from utils.visualization import vis_pose_result
 
     set_config('./configs/config.yaml')
     _cfg = get_config()
@@ -128,8 +128,9 @@ if __name__ == "__main__":
 
         _det = _detector.run(frame)
 
+        _kept_preds = None
         if len(_det):
-            kept_preds, heatmaps = _estimator.run(frame, _det)
+            _kept_preds, _heatmaps = _estimator.run(frame, _det)
 
         for d in _det:
             x1, y1, x2, y2 = map(int, d[:4])
@@ -137,6 +138,11 @@ if __name__ == "__main__":
             cv2.rectangle(frame, (x1, y1), (x2, y2), (96, 96, 216), thickness=2, lineType=cv2.LINE_AA)
             cv2.putText(frame, str(_detector.names[cls]), (x1, y1+20), cv2.FONT_HERSHEY_SIMPLEX, 1,
                         (96, 96, 96), thickness=1, lineType=cv2.LINE_AA)
+
+        if _kept_preds is not None:
+            frame = vis_pose_result(frame,
+                                    pred_kepts=_kept_preds,
+                                    model=_estimator.estimator.dataset)
 
         cv2.imshow('_', frame)
         if cv2.waitKey(1) == ord('q'):
