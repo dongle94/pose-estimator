@@ -45,6 +45,15 @@ def set_config(file):
     config.yolov8_agnostic_nms = _config['YOLOV8']['AGNOSTIC_NMS']
     config.yolov8_max_det = _config['YOLOV8']['MAX_DET']
 
+    # Kept(Pose)
+    config.kept_model_type = _config['KEPT']['MODEL_TYPE']
+    config.kept_model_path = _config['KEPT']['MODEL_PATH']
+    config.kept_half = _config['KEPT']['HALF']
+    config.kept_img_size = _config['KEPT']['IMG_SIZE']
+
+    # HRNet
+    config.hrnet_channel = _config['KEPT']['HRNET']['CHANNEL']
+
     # Logger
     config.log_level = _config['LOG']['LOG_LEVEL']
     config.logger_name = _config['LOG']['LOGGER_NAME']

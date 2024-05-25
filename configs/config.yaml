@@ -35,11 +35,14 @@ YOLOV8:
   MAX_DET: 100
 
 # Keypoint Detector
-KEPT_MODEL_TYPE: "hrnet"
-KEPT_MODEL_PATH: './weights/hrnet_coco_w32_256x192.pth'
-KEPT_MODEL_CNF: "./configs/hrnet_coco_w32_256x192.yaml"
-KEPT_HALF: false
-KEPT_IMG_SIZE: [256, 256]
+KEPT:
+  MODEL_TYPE: "hrnet"     # hrnet
+  MODEL_PATH: './weights/hrnet_pose/hrnet_coco_w32_256x192.pth'
+  HALF: False
+  IMG_SIZE: [256, 192]    # [384,288], [256,192], [256,256]
+
+  HRNET:
+    CHANNEL: 32
 
 
 # Logger
