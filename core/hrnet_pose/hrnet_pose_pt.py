@@ -4,6 +4,7 @@ import time
 import cv2
 import torch
 import math
+import numpy as np
 from torchvision import transforms
 from pathlib import Path
 
@@ -34,6 +35,7 @@ class PoseHRNetTorch(PoseHRNet):
             self.fp16 = False
             print("HRNet_pose pytorch model not support cpu version's fp16. It apply fp32.")
 
+        self.dataset = None
         self.weight_cfg = self.get_cfg_file()
         print(f"Weight config path: {self.weight_cfg}")
 
@@ -143,10 +145,10 @@ class PoseHRNetTorch(PoseHRNet):
         if img_size is None:
             img_size = [256, 192]
         if img_size[0] == img_size[1]:
-            dataset = "mpii"
+            self.dataset = "mpii"
         else:
-            dataset = "coco"
-        cfg_file = f"{dataset}_w{channel}_{img_size[0]}x{img_size[1]}.yaml"
+            self.dataset = "coco"
+        cfg_file = f"{self.dataset}_w{channel}_{img_size[0]}x{img_size[1]}.yaml"
         cfg_path = os.path.join(os.path.dirname(__file__), 'cfg', cfg_file)
 
         return cfg_path
@@ -158,10 +160,10 @@ class PoseHRNetTorch(PoseHRNet):
 
 
 if __name__ == '__main__':
-    import numpy as np
     from core.obj_detector import ObjectDetector
     from utils.logger import init_logger, get_logger
     from utils.config import set_config, get_config
+    from utils.visualization import vis_pose_result
 
     set_config('./configs/config.yaml')
     _cfg = get_config()
@@ -203,9 +205,9 @@ if __name__ == '__main__':
         cv2.putText(img, str(_detector.names[cls]), (x1, y1 + 20), cv2.FONT_HERSHEY_SIMPLEX, 1,
                     (96, 96, 96), thickness=1, lineType=cv2.LINE_AA)
 
-    for _kps in _kept_pred:
-        for _kp in _kps:
-            cv2.circle(img, (int(_kp[0]), int(_kp[1])), 4, (0, 0, 255), thickness=-1, lineType=cv2.LINE_AA)
+    if len(_kept_pred):
+        img = vis_pose_result(img, pred_kepts=_kept_pred, model=_estimator.dataset)
+
     cv2.imshow('_', img)
     cv2.waitKey(0)
     print(f"Detector: {t1 - t0:.6f} / pre:{t3 - t2:.6f} / infer: {t4 - t3:.6f} / post: {t5 - t4:.6f}")
