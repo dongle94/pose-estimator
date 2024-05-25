@@ -1,1 +1,2 @@
--r requirements/pose_detector.txt
+-r requirements/common.txt
+-r requirements/pose.txt
