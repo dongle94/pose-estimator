@@ -44,6 +44,10 @@ class ObjectDetector(object):
                     from core.yolov5.yolov5_ort import Yolov5ORT
                     model = Yolov5ORT
                     self.framework = 'onnx'
+                elif ext in ['.engine', '.bin']:
+                    from core.yolov5.yolov5_trt import Yolov5TRT
+                    model = Yolov5TRT
+                    self.framework = 'trt'
                 else:
                     raise FileNotFoundError('No Yolov5 weight File!')
             elif self.detector_type == "yolov8":
@@ -53,6 +57,14 @@ class ObjectDetector(object):
                     from core.yolov8.yolov8_pt import Yolov8Torch
                     model = Yolov8Torch
                     self.framework = 'torch'
+                elif ext == '.onnx':
+                    from core.yolov8.yolov8_ort import Yolov8ORT
+                    model = Yolov8ORT
+                    self.framework = 'onnx'
+                elif ext in ['.engine', '.bin']:
+                    from core.yolov8.yolov8_trt import Yolov8TRT
+                    model = Yolov8TRT
+                    self.framework = 'trt'
                 else:
                     raise FileNotFoundError('No Yolov8 weight File!')
             else:
