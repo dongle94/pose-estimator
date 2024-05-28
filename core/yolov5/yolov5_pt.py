@@ -48,9 +48,9 @@ class Yolov5Torch(YOLOV5):
 
     def warmup(self, img_size=(1, 3, 640, 640)):
         im = torch.empty(*img_size, dtype=torch.half if self.fp16 else torch.float, device=self.device)
-        t = time.time()
+        t = self.get_time()
         self.infer(im)  # warmup
-        print(f"-- Yolov5 Detector warmup: {time.time()-t:.6f} sec --")
+        print(f"-- Yolov5 Detector warmup: {self.get_time()-t:.6f} sec --")
 
     def preprocess(self, img: np.ndarray):
         im = letterbox(img, new_shape=self.img_size, auto=self.auto, stride=self.stride)[0]  # padded resize

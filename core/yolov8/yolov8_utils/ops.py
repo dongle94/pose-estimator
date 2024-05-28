@@ -209,6 +209,166 @@ def non_max_suppression(
     return output
 
 
+def non_max_suppression_np(
+    prediction: np.ndarray,
+    conf_thres: float = 0.25,
+    iou_thres: float = 0.45,
+    classes=None,
+    agnostic=False,
+    multi_label=False,
+    labels=(),
+    max_det=300,
+    nc=0,  # number of masks
+    max_time_img=0.05,
+    max_nms=30000,
+    max_wh=7600,
+    rotated=False,
+):
+    """Non-Maximum Suppression (NMS) on inference results to reject overlapping detections
+
+        Returns:
+             list of detections, on (n,6) tensor per image [xyxy, conf, cls]
+        """
+    # Check
+    assert 0 <= conf_thres <= 1, f'Invalid Confidence threshold {conf_thres}, valid values are between 0.0 and 1.0'
+    assert 0 <= iou_thres <= 1, f'Invalid IoU {iou_thres}, valid values are between 0.0 and 1.0'
+    if isinstance(prediction, (list, tuple)):  # YOLOv5 model in validation model, output = (inference_out, loss_out)
+        prediction = prediction[0]  # select only inference output
+
+    bs = prediction.shape[0]
+    nc = nc or (prediction.shape[2] - 4)
+    nm = prediction.shape[1] - nc - 4
+    mi = 4 + nc
+    xc = np.amax(prediction[:, 4:mi], axis=1) > conf_thres  # candidates
+
+    # Settings
+    time_limit = 0.5 + max_time_img * bs  # seconds to quit after
+    multi_label &= nc > 1  # multiple labels per box (adds 0.5ms/img)
+
+    prediction = prediction.transpose((0, 2, 1))
+    if not rotated:
+        prediction[..., :4] = xywh2xyxy(prediction[..., :4])  # xywh to xyxy
+
+    t = time.time()
+    output = [np.zeros((0, 6))] * bs
+    for xi, x in enumerate(prediction):  # image batch index, prediction
+        # Apply constraints
+        # x[((x[..., 2:4] < min_wh) | (x[..., 2:4] > max_wh)).any(1), 4] = 0  # width-height
+        x = x[xc[xi]]
+
+        # Cat apriori labels if autolabelling
+        if labels and len(labels[xi]) and not rotated:
+            lb = labels[xi]
+            v = np.zeros((len(lb), nc + nm + 4))
+            v[:, :4] = xywh2xyxy(lb[:, 1:5])  # box
+            v[range(len(lb)), lb[:, 0].long() + 4] = 1.0  # cls
+            x = np.concatenate((x, v), axis=0)
+
+        # If none remain process next image
+        if not x.shape[0]:
+            continue
+
+        # Detections matrix nx6 (xyxy, conf, cls)
+        box, cls = np.array_split(x, [4], axis=1)
+        mask = x[:, mi:]
+
+        if multi_label:
+            i, j = np.where(cls > conf_thres)
+            x = np.concatenate((box[i], x[i, 4 + j, None], j[:, None], mask[i]), 1)
+        else:
+            conf = np.max(cls, axis=1, keepdims=True)
+            j = np.argmax(cls, axis=1, keepdims=True)
+            x = np.concatenate((box, conf, j, mask), axis=1, dtype=np.float32)
+
+        # Filter by class
+        if classes is not None:
+            x = x[(x[:, 5:6] == np.array(classes)).any(1)]
+
+        n = x.shape[0]
+        if not n:
+            continue
+        elif n > max_nms:
+            x = x[x[:, 4].argsort()[::-1][:max_nms]]
+        else:
+            x = x[x[:, 4].argsort()[::-1]]
+
+        # Batched NMS
+        c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes
+        boxes, scores = x[:, :4] + c, x[:, 4]   # boxes (offset by class), scores
+        i = nms(x, iou_thres)  # NMS
+        i = i[:max_det]
+
+        # Experimental
+        # merge = False  # use merge-NMS
+        # if merge and (1 < n < 3E3):  # Merge NMS (boxes merged using weighted mean)
+        #    # Update boxes as boxes(i,4) = weights(i,n) * boxes(n,4)
+        #     iou = box_iou_np(boxes[i], boxes) > iou_thres  # iou matrix
+        #     weights = iou * scores[None]  # box weights
+        #     x[i, :4] = torch.mm(weights, x[:, :4]).float() / weights.sum(1, keepdim=True)  # merged boxes
+        #     redundant = True  # require redundant detections
+        #     if redundant:
+        #         i = i[iou.sum(1) > 1]  # require redundancy
+
+        output[xi] = x[np.array(i)]
+        if (time.time() - t) > time_limit:
+            print(f'WARNING ⚠️ NMS time limit {time_limit:.3f}s exceeded')
+            break  # time limit exceeded
+
+    return np.array(output)
+
+
+def nms(boxes, iou_thres=0.45, min_mode=False):
+    x1 = boxes[:, 0]
+    y1 = boxes[:, 1]
+    x2 = boxes[:, 2]
+    y2 = boxes[:, 3]
+    scores = boxes[:, 4]
+
+    areas = (x2 - x1 + 1) * (y2 - y1 + 1)
+    index_array = scores.argsort()[::-1]
+    keep = []
+    while index_array.size > 0:
+        keep.append(index_array[0])
+        x1_ = np.maximum(x1[index_array[0]], x1[index_array[1:]])
+        y1_ = np.maximum(y1[index_array[0]], y1[index_array[1:]])
+        x2_ = np.minimum(x2[index_array[0]], x2[index_array[1:]])
+        y2_ = np.minimum(y2[index_array[0]], y2[index_array[1:]])
+
+        w = np.maximum(0.0, x2_ - x1_ + 1)
+        h = np.maximum(0.0, y2_ - y1_ + 1)
+        inter = w * h
+
+        if min_mode:
+            overlap = inter / np.minimum(areas[index_array[0]], areas[index_array[1:]])
+        else:
+            overlap = inter / (areas[index_array[0]] + areas[index_array[1:]] - inter)
+
+        inds = np.where(overlap <= iou_thres)[0]
+        index_array = index_array[inds + 1]
+    return keep
+
+
+def box_iou_np(box1, box2, eps=1e-7):
+    """
+    Calculate intersection-over-union (IoU) of boxes.
+    Both sets of boxes are expected to be in (x1, y1, x2, y2) format.
+
+    Args:
+        box1 (numpy array): A numpy array of shape (N, 4) representing N bounding boxes.
+        box2 (numpy array): A numpy array of shape (M, 4) representing M bounding boxes.
+        eps (float, optional): A small value to avoid division by zero. Defaults to 1e-7.
+
+    Returns:
+        (numpy array): An NxM numpy array containing the pairwise IoU values for every element in box1 and box2.
+    """
+
+    (a1, a2), (b1, b2) = np.split(np.expand_dims(box1, axis=1), 2), np.split(np.expand_dims(box2, axis=1), 2)
+    inter = np.clip((np.min(a2, b2) - np.max(a1, b1)), a_min=0, a_max=None) * 2
+
+    # IoU = inter / (area1 + area2 - inter)
+    return inter / (((a2 - a1) * 2) + ((b2 - b1) * 2) - inter + eps)
+
+
 def clip_boxes(boxes, shape):
     """
     Takes a list of bounding boxes and a shape (height, width) and clips the bounding boxes to the shape.
