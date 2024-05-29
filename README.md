@@ -10,6 +10,10 @@ Post processing change the raw heatmap output to a joint position such as (x, y)
 ## Install (Test Evironments)
 - Ubuntu 20.04
 - python 3.8.15
+- torch 2.0.1
+- onnx >= 1.15.x
+- onnxruntime-gpu
+- tensorrt-cu11 10.0.1
 
 ```shell
 $ pip install -r ./requirements.txt
@@ -17,5 +21,7 @@ $ pip install -r ./requirements.txt
 
 
 ## Reference
-- yolov5: https://github.com/ultralytics/yolov5
+- YOLOv5: https://github.com/ultralytics/yolov5
 - YOLOv8(ultraytics): https://github.com/ultralytics/ultralytics
+- PoseHRNet: https://github.com/HRNet/HRNet-Human-Pose-Estimation
+- RTMPose: https://github.com/open-mmlab/mmpose/tree/dev-1.x/projects/rtmpose
