@@ -98,7 +98,7 @@ class RMTPoseTRT(object):
         return inputs, centers, scales
 
     def infer(self, imgs):
-        outputs = [[], []]
+        outputs = []
         simcc_x = []
         simcc_y = []
         for img in imgs:
@@ -118,10 +118,8 @@ class RMTPoseTRT(object):
                 nbytes = host_arr.size * host_arr.itemsize
                 cudart.cudaMemcpy(host_arr, device_ptr, nbytes, cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost)
                 if self.outputs[o]['name'] == 'simcc_x':
-                    # outputs[0].append(host_arr)
                     simcc_x.append(host_arr)
                 elif self.outputs[o]['name'] == 'simcc_y':
-                    # outputs[1].append(host_arr)
                     simcc_y.append(host_arr)
         simcc_x, simcc_y = np.array(simcc_x), np.array(simcc_y)
 
