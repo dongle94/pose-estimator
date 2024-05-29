@@ -39,6 +39,10 @@ class PoseEstimator(object):
                 from core.hrnet_pose.hrnet_pose_pt import PoseHRNetTorch
                 model = PoseHRNetTorch
                 self.framework = 'torch'
+            elif ext in [".onnx"]:
+                from core.hrnet_pose.hrnet_pose_ort import PoseHRNetOrt
+                model = PoseHRNetOrt
+                self.framework = 'onnx'
             else:
                 raise FileNotFoundError("No pose_hrnet weight File!")
             self.estimator = model(
@@ -83,7 +87,7 @@ class PoseEstimator(object):
         if isinstance(boxes, torch.Tensor):
             boxes = boxes.cpu().detach().numpy()
 
-        if self.estimator_type in ['hrnet']:
+        if self.estimator_type in ['hrnet', 'rtmpose']:
             # boxes coords are ltrb
             t0 = self.estimator.get_time()
             inp, centers, scales = self.estimator.preprocess(img, boxes)
@@ -93,31 +97,9 @@ class PoseEstimator(object):
 
             t2 = self.estimator.get_time()
             kept_pred, raw_heatmaps = self.estimator.postprocess(
-                preds=kept_pred, center=np.asarray(centers), scale=np.asarray(scales))
-            t3 = self.estimator.get_time()
+                preds=kept_pred, centers=np.asarray(centers), scales=np.asarray(scales)
+            )
 
-            # calculate time & logging
-            self.f_cnt += 1
-            self.ts[0] += t1 - t0
-            self.ts[1] += t2 - t1
-            self.ts[2] += t3 - t2
-            if self.f_cnt % self.cfg.console_log_interval == 0:
-                self.logger.debug(
-                    f"{self.estimator_type} estimator {self.f_cnt} Frames average time - "
-                    f"preproc: {self.ts[0] / self.f_cnt:.6f} sec / "
-                    f"infer: {self.ts[1] / self.f_cnt:.6f} sec / "
-                    f"postproc: {self.ts[2] / self.f_cnt:.6f} sec")
-        elif self.estimator_type in ['rtmpose']:
-            # boxes coords are ltrb
-            t0 = self.estimator.get_time()
-            inp, centers, scales = self.estimator.preprocess(img, boxes)
-
-            t1 = self.estimator.get_time()
-            kept_pred = self.estimator.infer(inp)
-
-            t2 = self.estimator.get_time()
-            kept_pred, raw_heatmaps = self.estimator.postprocess(
-                preds=kept_pred, centers=np.asarray(centers), scales=np.asarray(scales))
             t3 = self.estimator.get_time()
 
             # calculate time & logging

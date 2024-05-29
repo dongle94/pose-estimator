@@ -105,7 +105,7 @@ class PoseHRNetTorch(PoseHRNet):
         output = self.model(inputs)
         return output
 
-    def postprocess(self, preds, center, scale):
+    def postprocess(self, preds, centers, scales):
         batch_heatmaps = preds.cpu().detach().numpy()
 
         # raw_heatmaps -> coordinates
@@ -133,7 +133,7 @@ class PoseHRNetTorch(PoseHRNet):
         # Transform back
         for i in range(coords.shape[0]):
             preds[i] = transform_preds(
-                coords[i], center[i], scale[i], [heatmap_width, heatmap_height]
+                coords[i], centers[i], scales[i], [heatmap_width, heatmap_height]
             )
         preds = np.concatenate((preds, maxvals), axis=2)
 
