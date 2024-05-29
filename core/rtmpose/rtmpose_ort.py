@@ -1,0 +1,164 @@
+import cv2
+import sys
+import time
+import numpy as np
+from pathlib import Path
+
+import onnxruntime as ort
+
+FILE = Path(__file__).resolve()
+ROOT_PATH = FILE.parents[2]
+if ROOT_PATH not in sys.path:
+    sys.path.append(str(ROOT_PATH))
+
+from core.rtmpose.rtmpose_utils.preprocess import bbox_xyxy2cs, top_down_affine
+from core.rtmpose.rtmpose_utils.postprocess import decode
+
+
+class RMTPoseORT(object):
+    def __init__(self, weight: str, device: str = 'cpu', img_size: list = None, gpu_num: int = 0, fp16: bool = False):
+        super(RMTPoseORT, self).__init__()
+
+        self.img_size = img_size
+        self.device = device
+        self.gpu_num = gpu_num
+        self.cuda = ort.get_device() == 'GPU' and device == 'cuda'
+        self.fp16 = True if fp16 is True else False
+
+        providers = ['CPUExecutionProvider']
+        if self.cuda is True:
+            cuda_provider = (
+                "CUDAExecutionProvider", {
+                    "device_id": gpu_num,
+                    'arena_extend_strategy': 'kNextPowerOfTwo',
+                    'cudnn_conv_algo_search': 'HEURISTIC',
+                }
+            )
+            providers.insert(0, cuda_provider)
+        self.sess = ort.InferenceSession(path_or_bytes=weight, providers=providers)
+
+        self.input_name = self.sess.get_inputs()[0].name
+        self.input_shape = self.sess.get_inputs()[0].shape
+        self.output_names = [o.name for o in self.sess.get_outputs()]
+        self.output_shapes = [output.shape for output in self.sess.get_outputs()]
+        self.output_types = [output.type for output in self.sess.get_outputs()]
+
+        self.mean = (123.675, 116.28, 103.53)
+        self.std = (58.395, 57.12, 57.375)
+        self.dataset = "coco"
+
+    def warmup(self, img_size=(1, 3, 256, 192)):
+        im = np.zeros(img_size, dtype=np.float16 if self.fp16 else np.float32)
+        t = self.get_time()
+        self.infer(im)
+        print(f"-- RMTPoseORT Estimator warmup: {time.time() - t:.6f} sec --")
+
+    def preprocess(self, im, boxes):
+        centers = []
+        scales = []
+        inputs = []
+        for box in boxes[:, :4]:
+            center, scale = bbox_xyxy2cs(box, padding=1.25)
+
+            centers.append(center)
+            scales.append(scale)
+
+            # do affine transformation
+            input_size = [self.img_size[1], self.img_size[0]]
+            resized_img, scale = top_down_affine(input_size, scale, center, im)
+            # normalize image
+            resized_img = (resized_img - self.mean) / self.std
+            resized_img = resized_img[..., ::-1].transpose((2, 0, 1))
+            resized_img = np.ascontiguousarray(resized_img).astype(np.float32)
+            inputs.append(resized_img)
+
+        return np.array(inputs, dtype=np.float32), centers, scales
+
+    def infer(self, inputs):
+        ret = self.sess.run(self.output_names, {self.input_name: inputs})
+        return ret
+
+    def postprocess(self, preds, centers, scales, simcc_split_ratio: float = 2.0):
+        """Postprocess for RTMPose model output.
+
+            Args:
+                preds (np.ndarray): Output of RTMPose model.
+                centers (tuple): Center of bbox in shape (x, y).
+                scales (tuple): Scale of bbox in shape (w, h).
+                simcc_split_ratio (float): Split ratio of simcc.
+
+            Returns:
+                tuple:
+                - keypoints (np.ndarray): Rescaled keypoints.
+                - scores (np.ndarray): Model predict scores.
+            """
+        simcc_x, simcc_y = preds
+        heatmaps = np.einsum('ijk,ijm->ijmk', simcc_x, simcc_y)
+        keypoints, scores = decode(simcc_x, simcc_y, simcc_split_ratio)
+
+        # rescale keypoints
+        _keypoints = []
+        input_size = [self.img_size[1], self.img_size[0]]
+        for keypoint, center, scale in zip(keypoints, centers, scales):
+            keypoint = keypoint / input_size * scale
+            keypoint = keypoint + center - scale / 2
+            _keypoints.append(keypoint)
+        kepts = np.array(_keypoints)
+        preds = np.concatenate((kepts, np.expand_dims(scores, axis=-1)), axis=2)
+        return preds, heatmaps
+
+    def get_time(self):
+        return time.time()
+
+
+if __name__ == '__main__':
+    from core.obj_detector import ObjectDetector
+    from utils.logger import init_logger, get_logger
+    from utils.config import set_config, get_config
+    from utils.visualization import vis_pose_result
+
+    set_config('./configs/config.yaml')
+    _cfg = get_config()
+
+    init_logger(_cfg)
+    _logger = get_logger()
+
+    _detector = ObjectDetector(cfg=_cfg)
+    _estimator = RMTPoseORT(
+        weight=_cfg.kept_model_path,
+        device=_cfg.device,
+        img_size=_cfg.kept_img_size,
+        gpu_num=_cfg.gpu_num,
+        fp16=_cfg.kept_half
+    )
+    _estimator.warmup()
+
+    img = cv2.imread('./data/images/army.jpg')
+
+    t0 = _detector.detector.get_time()
+    _det = _detector.run(img)
+    _det_res = _det[:, :4]
+    t1 = _detector.detector.get_time()
+
+    input_img = img.copy()
+    t2 = _estimator.get_time()
+    _kept_inputs, _centers, _scales = _estimator.preprocess(input_img, _det_res)
+    t3 = _estimator.get_time()
+    _kept_pred = _estimator.infer(_kept_inputs)
+    t4 = _estimator.get_time()
+    _kept_pred, _raw_score = _estimator.postprocess(_kept_pred, np.asarray(_centers), np.asarray(_scales))
+    t5 = _estimator.get_time()
+
+    for d in _det:
+        x1, y1, x2, y2 = map(int, d[:4])
+        cls = int(d[5])
+        cv2.rectangle(img, (x1, y1), (x2, y2), (96, 96, 216), thickness=2, lineType=cv2.LINE_AA)
+        cv2.putText(img, str(_detector.names[cls]), (x1, y1 + 20), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                    (96, 96, 96), thickness=1, lineType=cv2.LINE_AA)
+
+    if len(_kept_pred):
+        img = vis_pose_result(img, pred_kepts=_kept_pred, model=_estimator.dataset)
+
+    cv2.imshow('_', img)
+    cv2.waitKey(0)
+    print(f"Detector: {t1 - t0:.6f} / pre:{t3 - t2:.6f} / infer: {t4 - t3:.6f} / post: {t5 - t4:.6f}")
