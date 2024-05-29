@@ -27,6 +27,7 @@ def convert(opt):
     config = builder.create_builder_config()
     # config.max_workspace_size = self.args.workspace * 1 << 30
     config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, opt.workspace << 30)
+    profile = builder.create_optimization_profile()
 
     flag = (1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
     network = builder.create_network(flag)
@@ -39,15 +40,14 @@ def convert(opt):
     outputs = [network.get_output(i) for i in range(network.num_outputs)]
     for inp in inputs:
         print(f'Input "{inp.name}" with shape{inp.shape} {inp.dtype}')
+        n, c, h, w = inp.shape
+        input_min, input_opt, input_max = (1, c, h, w), (1, c, h, w), (1, c, h, w)
+        profile.set_shape(network.get_input(0).name, min=input_min, opt=input_opt, max=input_max)
     for out in outputs:
         print(f'Output "{out.name}" with shape{out.shape} {out.dtype}')
 
     # if builder.platform_has_fast_fp16 and opt.fp16:
     #     config.set_flag(trt.BuilderFlag.FP16)
-
-    profile = builder.create_optimization_profile()
-    input_min, input_opt, input_max = (1, 3, 256, 192), (1, 3, 256, 192), (1, 3, 256, 192)
-    profile.set_shape(network.get_input(0).name, min=input_min, opt=input_opt, max=input_max)
 
     config.add_optimization_profile(profile)
 
