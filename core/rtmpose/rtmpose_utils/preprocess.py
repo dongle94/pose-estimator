@@ -36,7 +36,9 @@ def bbox_xyxy2cs(bbox: np.ndarray, padding: float = 1.):
     return center, scale
 
 
-def top_down_affine(input_size: list, bbox_scale: np.ndarray, bbox_center: np.ndarray,
+def top_down_affine(input_size: list,
+                    bbox_scale: np.ndarray,
+                    bbox_center: np.ndarray,
                     img: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Get the bbox image as the model input by affine transform.
 

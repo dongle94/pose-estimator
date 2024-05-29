@@ -60,12 +60,11 @@ class RMTPoseORT(object):
         for box in boxes[:, :4]:
             center, scale = bbox_xyxy2cs(box, padding=1.25)
 
-            centers.append(center)
-            scales.append(scale)
-
             # do affine transformation
             input_size = [self.img_size[1], self.img_size[0]]
             resized_img, scale = top_down_affine(input_size, scale, center, im)
+            centers.append(center)
+            scales.append(scale)
             # normalize image
             resized_img = (resized_img - self.mean) / self.std
             resized_img = resized_img[..., ::-1].transpose((2, 0, 1))
