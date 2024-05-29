@@ -55,6 +55,10 @@ class PoseEstimator(object):
                 from core.rtmpose.rtmpose_ort import RMTPoseORT
                 model = RMTPoseORT
                 self.framework = 'onnx'
+            elif ext in [".engine"]:
+                from core.rtmpose.rtmpose_trt import RMTPoseTRT
+                model = RMTPoseTRT
+                self.framework = 'trt'
             else:
                 raise FileNotFoundError("No rtmpose weight File!")
             self.estimator = model(
