@@ -154,7 +154,7 @@ class PoseHRNetOrt(PoseHRNet):
         # Transform back
         for i in range(coords.shape[0]):
             preds[i] = transform_preds(
-                coords[i], center[i], scale[i], [heatmap_width, heatmap_height]
+                coords[i], centers[i], scales[i], [heatmap_width, heatmap_height]
             )
         preds = np.concatenate((preds, maxvals), axis=2)
 
