@@ -49,7 +49,21 @@ class PoseEstimator(object):
                 gpu_num=gpu_num,
                 fp16=fp16
             )
-
+        elif self.estimator_type == "rtmpose":
+            ext = os.path.splitext(weight)[1]
+            if ext in [".onnx"]:
+                from core.rtmpose.rtmpose_ort import RMTPoseORT
+                model = RMTPoseORT
+                self.framework = 'onnx'
+            else:
+                raise FileNotFoundError("No rtmpose weight File!")
+            self.estimator = model(
+                weight=weight,
+                device=device,
+                img_size=img_size,
+                gpu_num=gpu_num,
+                fp16=fp16
+            )
         else:
             raise NotImplementedError(f'Unknown estimator type: {self.estimator_type}')
 
@@ -76,6 +90,30 @@ class PoseEstimator(object):
             t2 = self.estimator.get_time()
             kept_pred, raw_heatmaps = self.estimator.postprocess(
                 preds=kept_pred, center=np.asarray(centers), scale=np.asarray(scales))
+            t3 = self.estimator.get_time()
+
+            # calculate time & logging
+            self.f_cnt += 1
+            self.ts[0] += t1 - t0
+            self.ts[1] += t2 - t1
+            self.ts[2] += t3 - t2
+            if self.f_cnt % self.cfg.console_log_interval == 0:
+                self.logger.debug(
+                    f"{self.estimator_type} estimator {self.f_cnt} Frames average time - "
+                    f"preproc: {self.ts[0] / self.f_cnt:.6f} sec / "
+                    f"infer: {self.ts[1] / self.f_cnt:.6f} sec / "
+                    f"postproc: {self.ts[2] / self.f_cnt:.6f} sec")
+        elif self.estimator_type in ['rtmpose']:
+            # boxes coords are ltrb
+            t0 = self.estimator.get_time()
+            inp, centers, scales = self.estimator.preprocess(img, boxes)
+
+            t1 = self.estimator.get_time()
+            kept_pred = self.estimator.infer(inp)
+
+            t2 = self.estimator.get_time()
+            kept_pred, raw_heatmaps = self.estimator.postprocess(
+                preds=kept_pred, centers=np.asarray(centers), scales=np.asarray(scales))
             t3 = self.estimator.get_time()
 
             # calculate time & logging
