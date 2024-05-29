@@ -14,7 +14,7 @@ class PoseHRNet(object):
     def infer(self, inputs):
         pass
 
-    def postprocess(self, preds, center, scale):
+    def postprocess(self, preds, centers, scales):
         pass
 
     def get_time(self):

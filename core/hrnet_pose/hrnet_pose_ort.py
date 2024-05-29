@@ -2,11 +2,11 @@ import os
 import sys
 import time
 import cv2
-import torch
 import math
 import numpy as np
-from torchvision import transforms
 from pathlib import Path
+
+import onnxruntime as ort
 
 FILE = Path(__file__).resolve()
 ROOT_PATH = FILE.parents[2]
@@ -14,54 +14,64 @@ if ROOT_PATH not in sys.path:
     sys.path.append(str(ROOT_PATH))
 
 from core.hrnet_pose import PoseHRNet
-from core.hrnet_pose.models.pose_hrnet import PoseHighResolutionNet
-from core.hrnet_pose.hrnet_utils.torch_utils import select_device
 from core.hrnet_pose.hrnet_utils.transforms import box_to_center_scale, get_affine_transform, transform_preds
 from core.hrnet_pose.hrnet_utils.inference import get_max_preds
 
 
-class PoseHRNetTorch(PoseHRNet):
+class PoseHRNetOrt(PoseHRNet):
     def __init__(self, weight: str, device: str = 'cpu', channel: int = 32, img_size: list = None, gpu_num: int = 0,
                  fp16: bool = False):
-        super(PoseHRNetTorch, self).__init__()
+        super(PoseHRNetOrt, self).__init__()
 
-        self.device = select_device(device=device, gpu_num=gpu_num)
+        self.device = device
+        self.gpu_num = gpu_num
         self.channel = channel
         self.img_size = img_size
+        self.cuda = ort.get_device() == 'GPU' and device == 'cuda'
+        self.fp16 = True if fp16 is True else False
 
-        if fp16 is True and self.device.type != "cpu":
-            self.fp16 = True
+        if img_size[0] == img_size[1]:
+            self.dataset = "mpii"
         else:
-            self.fp16 = False
-            print("HRNet_pose pytorch model not support cpu version's fp16. It apply fp32.")
+            self.dataset = "coco"
 
-        self.dataset = None
-        self.weight_cfg = self.get_cfg_file()
-        print(f"Weight config path: {self.weight_cfg}")
+        providers = ['CPUExecutionProvider']
+        if self.cuda is True:
+            cuda_provider = (
+                "CUDAExecutionProvider", {
+                    "device_id": gpu_num,
+                    'arena_extend_strategy': 'kNextPowerOfTwo',
+                    'cudnn_conv_algo_search': 'HEURISTIC',
+                }
+            )
+            providers.insert(0, cuda_provider)
+        self.sess = ort.InferenceSession(weight, providers=providers)
+        self.io_binding = self.sess.io_binding()
+        if self.cuda:
+            self.io_binding.bind_output('outputs')
 
-        # get model
-        from core.hrnet_pose.cfg.default import _C as pose_cfg
-        pose_cfg.defrost()
-        pose_cfg.merge_from_file(self.weight_cfg)
-        pose_cfg.freeze()
-        model = PoseHighResolutionNet(cfg=pose_cfg)
-        model.load_state_dict(torch.load(weight, map_location=self.device), strict=False)
-        self.model = model.half() if self.fp16 else model.float()
-        self.model = self.model.to(self.device).eval()
+        self.input_name = self.sess.get_inputs()[0].name
+        self.input_shape = self.sess.get_inputs()[0].shape
+        self.output_names = [o.name for o in self.sess.get_outputs()]
+        self.output_shapes = [output.shape for output in self.sess.get_outputs()]
+        self.output_types = [output.type for output in self.sess.get_outputs()]
 
-        self.pose_transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                 std=[0.229, 0.224, 0.225]),
-        ])
+        self.mean = [0.485, 0.456, 0.406],
+        self.std = [0.229, 0.224, 0.225]
 
     def warmup(self, img_size=None):
         if img_size is None:
             img_size = (1, 3, self.img_size[0], self.img_size[1])
-        im = torch.empty(*img_size, dtype=torch.half if self.fp16 else torch.float, device=self.device)
+        im = np.zeros(img_size, dtype=np.float16 if self.fp16 else np.float32)
+        if self.device == 'cuda':
+            im_ortval = ort.OrtValue.ortvalue_from_numpy(im, 'cuda', self.gpu_num)
+            element_type = np.float16 if self.fp16 else np.float32
+            self.io_binding.bind_input(
+                name=self.input_name, device_type=im_ortval.device_name(), device_id=self.gpu_num, element_type=element_type,
+                shape=im_ortval.shape(), buffer_ptr=im_ortval.data_ptr())
         t = self.get_time()
         self.infer(im)
-        print(f"-- HRNetPose Estimator warmup: {time.time()-t:.6f} sec --")
+        print(f"-- HRNetPose Onnx Estimator warmup: {time.time()-t:.6f} sec --")
 
     def preprocess(self, im, boxes):
         """
@@ -74,43 +84,54 @@ class PoseHRNetTorch(PoseHRNet):
 
         centers = []
         scales = []
+        rotation = 0
+        model_inputs = []
         for box in boxes[:, :5]:
             center, scale = box_to_center_scale(box, self.img_size)
             centers.append(center)
             scales.append(scale)
 
-        rotation = 0
-        model_inputs = []
-        for center, scale in zip(centers, scales):
+            # do affine transformation
             trans = get_affine_transform(center, scale, rotation, (self.img_size[1], self.img_size[0]))
-            # Crop smaller image of people
-            model_input = cv2.warpAffine(
+            input_img = cv2.warpAffine(
                 im,
                 trans,
                 (int(self.img_size[1]), int(self.img_size[0])),
-                flags=cv2.INTER_LINEAR)
-            # hwc -> 1chw
-            model_input = self.pose_transform(model_input)  # .unsqueeze(0)
-            model_inputs.append(model_input)
+                flags=cv2.INTER_LINEAR
+            )
 
-        # n * 1chw -> nchw
-        model_inputs = torch.stack(model_inputs)
-        inputs = model_inputs.to(self.device)
-        if self.fp16:
-            inputs = inputs.half()
+            # normalize image
+            input_img = np.ascontiguousarray(input_img).astype(np.float32)
+            input_img /= 255.0
+            input_img = (input_img - self.mean) / self.std
+            input_img = input_img[..., ::-1].transpose((2, 0, 1))
+            model_inputs.append(input_img)
+
+        inputs = np.array(model_inputs, dtype=np.float16 if self.fp16 else np.float32)
+
+        if self.device == 'cuda':
+            im_ortval = ort.OrtValue.ortvalue_from_numpy(inputs, self.device, self.gpu_num)
+            element_type = np.float16 if self.fp16 else np.float32
+            self.io_binding.bind_input(
+                name=self.input_name, device_type=im_ortval.device_name(), device_id=self.gpu_num,
+                element_type=element_type, shape=im_ortval.shape(), buffer_ptr=im_ortval.data_ptr())
 
         return inputs, centers, scales
 
-    def infer(self, inputs):
-        output = self.model(inputs)
-        return output
+    def infer(self, imgs):
+        if self.device == 'cuda':
+            self.sess.run_with_iobinding(self.io_binding)
+            ret = None
+        else:
+            ret = self.sess.run(self.output_names, {self.input_name: imgs})
+        return ret
 
     def postprocess(self, preds, centers, scales):
-        batch_heatmaps = preds.cpu().detach().numpy()
-
+        if self.device == 'cuda':
+            preds = self.io_binding.copy_outputs_to_cpu()[0]
         # raw_heatmaps -> coordinates
+        batch_heatmaps = preds
         coords, maxvals = get_max_preds(batch_heatmaps)
-
         heatmap_height = batch_heatmaps.shape[2]
         heatmap_width = batch_heatmaps.shape[3]
 
@@ -139,25 +160,6 @@ class PoseHRNetTorch(PoseHRNet):
 
         return preds, batch_heatmaps
 
-    def get_cfg_file(self):
-        img_size = self.img_size
-        channel = self.channel
-        if img_size is None:
-            img_size = [256, 192]
-        if img_size[0] == img_size[1]:
-            self.dataset = "mpii"
-        else:
-            self.dataset = "coco"
-        cfg_file = f"{self.dataset}_w{channel}_{img_size[0]}x{img_size[1]}.yaml"
-        cfg_path = os.path.join(os.path.dirname(__file__), 'cfg', cfg_file)
-
-        return cfg_path
-
-    def get_time(self):
-        if self.device.type == 'cuda':
-            torch.cuda.synchronize()
-        return time.time()
-
 
 if __name__ == '__main__':
     from core.obj_detector import ObjectDetector
@@ -172,7 +174,7 @@ if __name__ == '__main__':
     _logger = get_logger()
 
     _detector = ObjectDetector(cfg=_cfg)
-    _estimator = PoseHRNetTorch(
+    _estimator = PoseHRNetOrt(
         weight=_cfg.kept_model_path,
         device=_cfg.device,
         channel=_cfg.hrnet_channel,
@@ -182,16 +184,15 @@ if __name__ == '__main__':
     )
     _estimator.warmup()
 
-    img = cv2.imread('./data/images/army.jpg')
+    _img = cv2.imread('./data/images/army.jpg')
 
     t0 = _detector.detector.get_time()
-    _det = _detector.run(img)
-    _det = _det.detach().cpu().numpy()
+    _det = _detector.run(_img)
     t1 = _detector.detector.get_time()
 
-    input_img = img.copy()
+    _input_img = _img.copy()
     t2 = _estimator.get_time()
-    _kept_inputs, _centers, _scales = _estimator.preprocess(input_img, _det)
+    _kept_inputs, _centers, _scales = _estimator.preprocess(_input_img, _det)
     t3 = _estimator.get_time()
     _kept_pred = _estimator.infer(_kept_inputs)
     t4 = _estimator.get_time()
@@ -201,13 +202,13 @@ if __name__ == '__main__':
     for d in _det:
         x1, y1, x2, y2 = map(int, d[:4])
         cls = int(d[5])
-        cv2.rectangle(img, (x1, y1), (x2, y2), (96, 96, 216), thickness=2, lineType=cv2.LINE_AA)
-        cv2.putText(img, str(_detector.names[cls]), (x1, y1 + 20), cv2.FONT_HERSHEY_SIMPLEX, 1,
+        cv2.rectangle(_img, (x1, y1), (x2, y2), (96, 96, 216), thickness=2, lineType=cv2.LINE_AA)
+        cv2.putText(_img, str(_detector.names[cls]), (x1, y1 + 20), cv2.FONT_HERSHEY_SIMPLEX, 1,
                     (96, 96, 96), thickness=1, lineType=cv2.LINE_AA)
 
     if len(_kept_pred):
-        img = vis_pose_result(img, pred_kepts=_kept_pred, model=_estimator.dataset)
+        img = vis_pose_result(_img, pred_kepts=_kept_pred, model=_estimator.dataset)
 
-    cv2.imshow('_', img)
+    cv2.imshow('_', _img)
     cv2.waitKey(0)
     print(f"Detector: {t1 - t0:.6f} / pre:{t3 - t2:.6f} / infer: {t4 - t3:.6f} / post: {t5 - t4:.6f}")
