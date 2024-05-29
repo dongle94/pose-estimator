@@ -19,6 +19,12 @@ Post processing change the raw heatmap output to a joint position such as (x, y)
 $ pip install -r ./requirements.txt
 ```
 
+## Optimization
+You can use scripts in tools. For Example,
+```shell
+$ python tools/rtmpose_onnx2trt.py -w ./weights/rtmpose/rtmpose-x_coco_384x288.onnx --verbose
+```
+
 
 ## Reference
 - YOLOv5: https://github.com/ultralytics/yolov5
