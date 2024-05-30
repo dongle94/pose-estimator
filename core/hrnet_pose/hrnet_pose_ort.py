@@ -109,26 +109,29 @@ class PoseHRNetORT(PoseHRNet):
 
         inputs = np.array(model_inputs, dtype=np.float16 if self.fp16 else np.float32)
 
-        if self.device == 'cuda':
-            im_ortval = ort.OrtValue.ortvalue_from_numpy(inputs, self.device, self.gpu_num)
-            element_type = np.float16 if self.fp16 else np.float32
-            self.io_binding.bind_input(
-                name=self.input_name, device_type=im_ortval.device_name(), device_id=self.gpu_num,
-                element_type=element_type, shape=im_ortval.shape(), buffer_ptr=im_ortval.data_ptr())
-
         return inputs, centers, scales
 
     def infer(self, inputs):
-        if self.device == 'cuda':
-            self.sess.run_with_iobinding(self.io_binding)
-            ret = None
-        else:
-            ret = self.sess.run(self.output_names, {self.input_name: inputs})
-        return ret
+        rets = []
+        for img in inputs:
+            if self.device == 'cuda':
+                img = np.expand_dims(img, 0)
+                im_ortval = ort.OrtValue.ortvalue_from_numpy(img, self.device, self.gpu_num)
+                element_type = np.float16 if self.fp16 else np.float32
+                self.io_binding.bind_input(
+                    name=self.input_name, device_type=im_ortval.device_name(), device_id=self.gpu_num,
+                    element_type=element_type, shape=im_ortval.shape(), buffer_ptr=im_ortval.data_ptr())
+
+                self.sess.run_with_iobinding(self.io_binding)
+
+                ret = self.io_binding.copy_outputs_to_cpu()[0][0]
+                rets.append(ret)
+            else:
+                rets = self.sess.run(self.output_names, {self.input_name: inputs})
+        rets = np.array(rets)
+        return rets
 
     def postprocess(self, preds, centers, scales):
-        if self.device == 'cuda':
-            preds = self.io_binding.copy_outputs_to_cpu()[0]
         # raw_heatmaps -> coordinates
         batch_heatmaps = preds
         coords, maxvals = get_max_preds(batch_heatmaps)
