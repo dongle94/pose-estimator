@@ -118,8 +118,9 @@ class PoseHRNetTRT(PoseHRNet):
     def infer(self, inputs):
         outputs = []
         for img in inputs:
+            outs = []
             for shape, dtype in self.output_spec():
-                outputs.append(np.zeros(shape, dtype))
+                outs.append(np.zeros(shape, dtype))
 
             device_ptr = self.inputs[0]['allocation']
             host_arr = img
@@ -127,12 +128,12 @@ class PoseHRNetTRT(PoseHRNet):
             cudart.cudaMemcpy(device_ptr, host_arr.data, nbytes, cudart.cudaMemcpyKind.cudaMemcpyHostToDevice)
 
             self.context.execute_v2(self.allocations)
-            for o in range(len(outputs)):
-                host_arr = outputs[o]
+            for o in range(len(outs)):
+                host_arr = outs[o][0]
                 device_ptr = self.outputs[o]['allocation']
                 nbytes = host_arr.size * host_arr.itemsize
                 cudart.cudaMemcpy(host_arr, device_ptr, nbytes, cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost)
-                outputs[o] = outputs[o][0]
+                outputs.append(host_arr)
         outputs = np.array(outputs)
 
         return outputs
