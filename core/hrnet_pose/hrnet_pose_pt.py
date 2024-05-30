@@ -182,16 +182,16 @@ if __name__ == '__main__':
     )
     _estimator.warmup()
 
-    img = cv2.imread('./data/images/army.jpg')
+    _img = cv2.imread('./data/images/army.jpg')
 
     t0 = _detector.detector.get_time()
-    _det = _detector.run(img)
+    _det = _detector.run(_img)
     _det = _det.detach().cpu().numpy()
     t1 = _detector.detector.get_time()
 
-    input_img = img.copy()
+    _input_img = _img.copy()
     t2 = _estimator.get_time()
-    _kept_inputs, _centers, _scales = _estimator.preprocess(input_img, _det)
+    _kept_inputs, _centers, _scales = _estimator.preprocess(_input_img, _det)
     t3 = _estimator.get_time()
     _kept_pred = _estimator.infer(_kept_inputs)
     t4 = _estimator.get_time()
@@ -201,13 +201,13 @@ if __name__ == '__main__':
     for d in _det:
         x1, y1, x2, y2 = map(int, d[:4])
         cls = int(d[5])
-        cv2.rectangle(img, (x1, y1), (x2, y2), (96, 96, 216), thickness=2, lineType=cv2.LINE_AA)
-        cv2.putText(img, str(_detector.names[cls]), (x1, y1 + 20), cv2.FONT_HERSHEY_SIMPLEX, 1,
+        cv2.rectangle(_img, (x1, y1), (x2, y2), (96, 96, 216), thickness=2, lineType=cv2.LINE_AA)
+        cv2.putText(_img, str(_detector.names[cls]), (x1, y1 + 20), cv2.FONT_HERSHEY_SIMPLEX, 1,
                     (96, 96, 96), thickness=1, lineType=cv2.LINE_AA)
 
     if len(_kept_pred):
-        img = vis_pose_result(img, pred_kepts=_kept_pred, model=_estimator.dataset)
+        _img = vis_pose_result(_img, pred_kepts=_kept_pred, model=_estimator.dataset)
 
-    cv2.imshow('_', img)
+    cv2.imshow('_', _img)
     cv2.waitKey(0)
     print(f"Detector: {t1 - t0:.6f} / pre:{t3 - t2:.6f} / infer: {t4 - t3:.6f} / post: {t5 - t4:.6f}")
