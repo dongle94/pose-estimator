@@ -68,7 +68,9 @@ class RMTPoseTRT(object):
         self.std = (58.395, 57.12, 57.375)
         self.dataset = "coco"
 
-    def warmup(self, img_size=(1, 3, 256, 192)):
+    def warmup(self, img_size=None):
+        if img_size is None:
+            img_size = (1, 3, self.img_size[0], self.img_size[1])
         im = np.zeros(img_size, dtype=np.float16 if self.fp16 else np.float32)  # input
         t = self.get_time()
         self.infer(im)  # warmup
@@ -188,9 +190,9 @@ if __name__ == '__main__':
     _det_res = _det[:, :4]
     t1 = _detector.detector.get_time()
 
-    input_img = _img.copy()
+    _input_img = _img.copy()
     t2 = _estimator.get_time()
-    _kept_inputs, _centers, _scales = _estimator.preprocess(input_img, _det_res)
+    _kept_inputs, _centers, _scales = _estimator.preprocess(_input_img, _det_res)
     t3 = _estimator.get_time()
     _kept_pred = _estimator.infer(_kept_inputs)
     t4 = _estimator.get_time()
@@ -205,7 +207,7 @@ if __name__ == '__main__':
                     (96, 96, 96), thickness=1, lineType=cv2.LINE_AA)
 
     if len(_kept_pred):
-        img = vis_pose_result(_img, pred_kepts=_kept_pred, model=_estimator.dataset)
+        _img = vis_pose_result(_img, pred_kepts=_kept_pred, model=_estimator.dataset)
 
     cv2.imshow('_', _img)
     cv2.waitKey(0)

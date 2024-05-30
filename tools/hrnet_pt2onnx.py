@@ -80,7 +80,6 @@ def convert(opt):
             print(f"simplifier failure: {e}")
 
 
-
 def arg_parse():
     parser = argparse.ArgumentParser()
     parser.add_argument('-w', '--weight', required=True, help=".pt or .pth file path")
