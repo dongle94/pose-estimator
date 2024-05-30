@@ -40,9 +40,13 @@ class PoseEstimator(object):
                 model = PoseHRNetTorch
                 self.framework = 'torch'
             elif ext in [".onnx"]:
-                from core.hrnet_pose.hrnet_pose_ort import PoseHRNetOrt
-                model = PoseHRNetOrt
+                from core.hrnet_pose.hrnet_pose_ort import PoseHRNetORT
+                model = PoseHRNetORT
                 self.framework = 'onnx'
+            elif ext in [".engine"]:
+                from core.hrnet_pose.hrnet_pose_trt import PoseHRNetTRT
+                model = PoseHRNetTRT
+                self.framework = 'trt'
             else:
                 raise FileNotFoundError("No pose_hrnet weight File!")
             self.estimator = model(
