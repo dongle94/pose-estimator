@@ -18,10 +18,10 @@ from core.hrnet_pose.hrnet_utils.transforms import box_to_center_scale, get_affi
 from core.hrnet_pose.hrnet_utils.inference import get_max_preds
 
 
-class PoseHRNetOrt(PoseHRNet):
+class PoseHRNetORT(PoseHRNet):
     def __init__(self, weight: str, device: str = 'cpu', channel: int = 32, img_size: list = None, gpu_num: int = 0,
                  fp16: bool = False):
-        super(PoseHRNetOrt, self).__init__()
+        super(PoseHRNetORT, self).__init__()
 
         self.device = device
         self.gpu_num = gpu_num
@@ -174,7 +174,7 @@ if __name__ == '__main__':
     _logger = get_logger()
 
     _detector = ObjectDetector(cfg=_cfg)
-    _estimator = PoseHRNetOrt(
+    _estimator = PoseHRNetORT(
         weight=_cfg.kept_model_path,
         device=_cfg.device,
         channel=_cfg.hrnet_channel,
