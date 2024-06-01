@@ -152,7 +152,7 @@ if __name__ == "__main__":
                                realtime=_realtime,
                                bgr=_bgr,
                                opt=_cfg)
-    wt = 1 / media_loader.dataset.fps
+    wt = 0 if media_loader.is_imgs else 1 / media_loader.dataset.fps
 
     while True:
         st = time.time()
@@ -167,13 +167,18 @@ if __name__ == "__main__":
             cv2.putText(frame, str(_detector.names[cls]), (x1, y1+20), cv2.FONT_HERSHEY_SIMPLEX, 1,
                         (96, 96, 96), thickness=1, lineType=cv2.LINE_AA)
 
+        et = time.time()
+        if media_loader.is_imgs:
+            t = 0
+        else:
+            if et - st < wt:
+                t = int((wt - (et - st)) * 1000)
+            else:
+                t = 1
+
         cv2.imshow('_', frame)
-        if cv2.waitKey(1) == ord('q'):
+        if cv2.waitKey(t) == ord('q'):
             print("-- CV2 Stop --")
             break
-
-        et = time.time()
-        if et - st < wt:
-            time.sleep(wt - (et - st))
 
     print("-- Stop program --")
