@@ -22,10 +22,7 @@ class LoadVideo(LoadSample):
         if path.split('.')[-1].lower() not in VID_FORMATS:
             raise FileNotFoundError(f"File ext is invalid: {path}")
 
-        if platform.system() == 'Windows':
-            cap = cv2.VideoCapture(path, cv2.CAP_DSHOW)
-        else:
-            cap = cv2.VideoCapture(path)
+        cap = cv2.VideoCapture(path)
         assert cap.isOpened(), f'Failed to open {path}'
 
         self.mode = 'video'
