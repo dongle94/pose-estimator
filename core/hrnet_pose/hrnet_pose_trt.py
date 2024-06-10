@@ -21,7 +21,7 @@ from core.hrnet_pose.hrnet_utils.inference import get_max_preds
 
 class PoseHRNetTRT(PoseHRNet):
     def __init__(self, weight: str, device: str = 'cpu', channel: int = 32, img_size: list = None, gpu_num: int = 0,
-                 fp16: bool = False):
+                 fp16: bool = False, dataset_format: str = 'coco'):
         super(PoseHRNetTRT, self).__init__()
 
         self.device = device
@@ -29,11 +29,7 @@ class PoseHRNetTRT(PoseHRNet):
         self.channel = channel
         self.img_size = img_size
         self.fp16 = True if fp16 is True else False
-
-        if img_size[0] == img_size[1]:
-            self.dataset = "mpii"
-        else:
-            self.dataset = "coco"
+        self.dataset = dataset_format
 
         self.trt_logger = trt.Logger(trt.Logger.INFO)
         trt.init_libnvinfer_plugins(self.trt_logger, namespace="")
@@ -204,7 +200,8 @@ if __name__ == '__main__':
         device=_cfg.device,
         img_size=_cfg.kept_img_size,
         gpu_num=_cfg.gpu_num,
-        fp16=_cfg.kept_half
+        fp16=_cfg.kept_half,
+        dataset_format=_cfg.kept_format
     )
     _estimator.warmup()
 

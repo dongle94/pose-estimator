@@ -22,7 +22,7 @@ from core.hrnet_pose.hrnet_utils.inference import get_max_preds
 
 class PoseHRNetTorch(PoseHRNet):
     def __init__(self, weight: str, device: str = 'cpu', channel: int = 32, img_size: list = None, gpu_num: int = 0,
-                 fp16: bool = False):
+                 fp16: bool = False, dataset_format: str = 'coco'):
         super(PoseHRNetTorch, self).__init__()
 
         self.device = select_device(device=device, gpu_num=gpu_num)
@@ -35,7 +35,7 @@ class PoseHRNetTorch(PoseHRNet):
             self.fp16 = False
             print("HRNet_pose pytorch model not support cpu version's fp16. It apply fp32.")
 
-        self.dataset = None
+        self.dataset = dataset_format
         self.weight_cfg = self.get_cfg_file()
         print(f"Weight config path: {self.weight_cfg}")
 
@@ -144,10 +144,6 @@ class PoseHRNetTorch(PoseHRNet):
         channel = self.channel
         if img_size is None:
             img_size = [256, 192]
-        if img_size[0] == img_size[1]:
-            self.dataset = "mpii"
-        else:
-            self.dataset = "coco"
         cfg_file = f"{self.dataset}_w{channel}_{img_size[0]}x{img_size[1]}.yaml"
         cfg_path = os.path.join(os.path.dirname(__file__), 'cfg', cfg_file)
 
@@ -178,7 +174,8 @@ if __name__ == '__main__':
         channel=_cfg.hrnet_channel,
         img_size=_cfg.kept_img_size,
         gpu_num=_cfg.gpu_num,
-        fp16=_cfg.kept_half
+        fp16=_cfg.kept_half,
+        dataset_format=_cfg.kept_format
     )
     _estimator.warmup()
 

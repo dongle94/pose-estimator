@@ -16,7 +16,8 @@ from core.rtmpose.rtmpose_utils.postprocess import decode
 
 
 class RMTPoseORT(object):
-    def __init__(self, weight: str, device: str = 'cpu', img_size: list = None, gpu_num: int = 0, fp16: bool = False):
+    def __init__(self, weight: str, device: str = 'cpu', img_size: list = None, gpu_num: int = 0, fp16: bool = False,
+                 dataset_format: str = 'coco'):
         super(RMTPoseORT, self).__init__()
 
         self.img_size = img_size
@@ -24,6 +25,7 @@ class RMTPoseORT(object):
         self.gpu_num = gpu_num
         self.cuda = ort.get_device() == 'GPU' and device == 'cuda'
         self.fp16 = True if fp16 is True else False
+        self.dataset = dataset_format
 
         providers = ['CPUExecutionProvider']
         if self.cuda is True:
@@ -46,10 +48,7 @@ class RMTPoseORT(object):
         self.mean = (123.675, 116.28, 103.53)
         self.std = (58.395, 57.12, 57.375)
 
-        if img_size[0] == img_size[1]:
-            self.dataset = "mpii"
-        else:
-            self.dataset = "coco"
+
 
     def warmup(self, img_size=None):
         if img_size is None:
@@ -136,7 +135,8 @@ if __name__ == '__main__':
         device=_cfg.device,
         img_size=_cfg.kept_img_size,
         gpu_num=_cfg.gpu_num,
-        fp16=_cfg.kept_half
+        fp16=_cfg.kept_half,
+        dataset_format=_cfg.kept_format
     )
     _estimator.warmup()
 
