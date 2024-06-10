@@ -36,10 +36,6 @@ class RMTPoseORT(object):
             )
             providers.insert(0, cuda_provider)
         self.sess = ort.InferenceSession(path_or_bytes=weight, providers=providers)
-        self.io_binding = self.sess.io_binding()
-        if device == 'cuda':
-            self.io_binding.bind_output('simcc_x')
-            self.io_binding.bind_output('simcc_y')
 
         self.input_name = self.sess.get_inputs()[0].name
         self.input_shape = self.sess.get_inputs()[0].shape
@@ -49,18 +45,16 @@ class RMTPoseORT(object):
 
         self.mean = (123.675, 116.28, 103.53)
         self.std = (58.395, 57.12, 57.375)
-        self.dataset = "coco"
+
+        if img_size[0] == img_size[1]:
+            self.dataset = "mpii"
+        else:
+            self.dataset = "coco"
 
     def warmup(self, img_size=None):
         if img_size is None:
             img_size = (1, 3, self.img_size[0], self.img_size[1])
         im = np.zeros(img_size, dtype=np.float16 if self.fp16 else np.float32)
-        if self.device == 'cuda':
-            im_ortval = ort.OrtValue.ortvalue_from_numpy(im, 'cuda', self.gpu_num)
-            element_type = np.float16 if self.fp16 else np.float32
-            self.io_binding.bind_input(
-                name='input', device_type=im_ortval.device_name(), device_id=self.gpu_num, element_type=element_type,
-                shape=im_ortval.shape(), buffer_ptr=im_ortval.data_ptr())
         t = self.get_time()
         self.infer(im)
         print(f"-- RMTPoseORT Estimator warmup: {time.time() - t:.6f} sec --")
@@ -85,20 +79,10 @@ class RMTPoseORT(object):
 
         inputs = np.array(inputs, dtype=np.float32)
 
-        if self.device == 'cuda':
-            im_ortval = ort.OrtValue.ortvalue_from_numpy(inputs, self.device, self.gpu_num)
-            element_type = np.float16 if self.fp16 else np.float32
-            self.io_binding.bind_input(
-                name='input', device_type=im_ortval.device_name(), device_id=self.gpu_num,
-                element_type=element_type, shape=im_ortval.shape(), buffer_ptr=im_ortval.data_ptr())
         return inputs, centers, scales
 
     def infer(self, inputs):
-        if self.device == 'cuda':
-            self.sess.run_with_iobinding(self.io_binding)
-            ret = None
-        else:
-            ret = self.sess.run(self.output_names, {self.input_name: inputs})
+        ret = self.sess.run(self.output_names, {self.input_name: inputs})
         return ret
 
     def postprocess(self, preds, centers, scales, simcc_split_ratio: float = 2.0):
@@ -115,8 +99,6 @@ class RMTPoseORT(object):
                 - keypoints (np.ndarray): Rescaled keypoints.
                 - scores (np.ndarray): Model predict scores.
             """
-        if self.device == 'cuda':
-            preds = self.io_binding.copy_outputs_to_cpu()
         simcc_x, simcc_y = preds
         heatmaps = np.einsum('ijk,ijm->ijmk', simcc_x, simcc_y)
         keypoints, scores = decode(simcc_x, simcc_y, simcc_split_ratio)
