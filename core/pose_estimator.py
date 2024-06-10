@@ -31,6 +31,7 @@ class PoseEstimator(object):
         gpu_num = cfg.gpu_num
         fp16 = cfg.kept_half
         img_size = cfg.kept_img_size
+        kept_format = cfg.kept_format
 
         if self.estimator_type == "hrnet":
             channel = cfg.hrnet_channel
@@ -55,7 +56,8 @@ class PoseEstimator(object):
                 channel=channel,
                 img_size=img_size,
                 gpu_num=gpu_num,
-                fp16=fp16
+                fp16=fp16,
+                dataset_format=kept_format
             )
         elif self.estimator_type == "rtmpose":
             ext = os.path.splitext(weight)[1]
@@ -74,7 +76,8 @@ class PoseEstimator(object):
                 device=device,
                 img_size=img_size,
                 gpu_num=gpu_num,
-                fp16=fp16
+                fp16=fp16,
+                dataset_format=kept_format
             )
         else:
             raise NotImplementedError(f'Unknown estimator type: {self.estimator_type}')
