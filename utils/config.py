@@ -50,6 +50,7 @@ def set_config(file):
     config.kept_model_path = _config['KEPT']['MODEL_PATH']
     config.kept_half = _config['KEPT']['HALF']
     config.kept_img_size = _config['KEPT']['IMG_SIZE']
+    config.kept_format = _config['KEPT']['FORMAT']
 
     # HRNet
     config.hrnet_channel = _config['KEPT']['HRNET']['CHANNEL']

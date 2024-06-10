@@ -40,6 +40,7 @@ KEPT:
   MODEL_PATH: './weights/hrnet_pose/hrnet_coco_w32_256x192.pth'
   HALF: False
   IMG_SIZE: [256, 192]    # [384,288], [256,192], [256,256]
+  FORMAT: 'coco'      # coco, mpii, coco-hand
 
   HRNET:
     CHANNEL: 32
