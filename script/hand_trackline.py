@@ -56,28 +56,34 @@ def main():
 
         cv2.rectangle(frame, (roi_x1, roi_y1), (roi_x2, roi_y2), (50, 50, 180), thickness=2)
 
-        right_hand_idx = None
-        valid_box = []
+        valid_boxes = []
         for idx, d in enumerate(_det):
             x1, y1, x2, y2 = map(int, d[:4])
             cls = int(d[5])
-            if (roi_x1 <= x1 <= roi_x2 and roi_y1 <= y1 <= roi_y2) or (roi_x1 <= x2 <= roi_x2 and roi_y1 <= y2 <= roi_y2):
-                valid_box.append(idx)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (96, 96, 216), thickness=2, lineType=cv2.LINE_AA)
+            cv2.putText(frame, str(_detector.names[cls]), (x1, y1 + 20), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                        (96, 96, 96), thickness=1, lineType=cv2.LINE_AA)
             if cls == 0:
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (96, 96, 216), thickness=2, lineType=cv2.LINE_AA)
-                cv2.putText(frame, str(_detector.names[cls]), (x1, y1 + 20), cv2.FONT_HERSHEY_SIMPLEX, 1,
-                            (96, 96, 96), thickness=1, lineType=cv2.LINE_AA)
-                right_hand_idx = idx
+                valid_boxes.append(idx)
 
-        if _kept_preds is not None and right_hand_idx is not None:
-            kept_preds = np.array(_kept_preds)[valid_box]
+        valid_idx = -1
+        if _kept_preds is not None and valid_boxes:
+            area = 0
+            for idx in valid_boxes:
+                hand_kept = _kept_preds[idx]
+                det = _det[idx]
+                x1, y1, x2, y2 = map(int, det[:4])
+                bench_x, bench_y = hand_kept[8][:2]
+                if (roi_x1 <= bench_x <= roi_x2 and roi_y1 <= bench_y <= roi_y2) and area < (x2 - x1) * (y2 - y1):
+                    valid_idx = idx
+
+        if valid_idx != -1:
+            kept_preds = np.expand_dims(np.array(_kept_preds)[valid_idx], axis=0)
             frame = vis_pose_result(frame,
                                     pred_kepts=kept_preds,
                                     model=_estimator.estimator.dataset)
-
-        if right_hand_idx is not None:
-            x, y = np.array(_kept_preds)[right_hand_idx][8][:2]
-            if roi_x1 <= x <= roi_x2 and roi_y1 <= y <= roi_y2:
+            x, y, score = _kept_preds[valid_idx][8]
+            if score > 0.5:
                 sign_points.append([int(x), int(y)])
 
         for idx, pt in enumerate(sign_points):
