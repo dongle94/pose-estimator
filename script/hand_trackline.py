@@ -75,6 +75,7 @@ def main():
                 x1, y1, x2, y2 = map(int, det[:4])
                 bench_x, bench_y = hand_kept[8][:2]
                 if (roi_x1 <= bench_x <= roi_x2 and roi_y1 <= bench_y <= roi_y2) and area < (x2 - x1) * (y2 - y1):
+                    area = (x2 - x1) * (y2 - y1)
                     valid_idx = idx
 
         if valid_idx != -1:
