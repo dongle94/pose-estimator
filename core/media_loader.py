@@ -50,6 +50,11 @@ class MediaLoader(object):
         else:
             raise NotImplementedError(f'Invalid input: {source}')
 
+        if self.is_vid or self.is_stream:
+            self.width, self.height = dataset.w, dataset.h
+        else:       # self.is_imgs:
+            self.width, self.height = opt.media_width, opt.media_height
+
         self.dataset = dataset
 
         # self.alive = True
