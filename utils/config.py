@@ -25,6 +25,8 @@ def set_config(file):
     config.media_fps = _config['MEDIA']['FPS']
     config.media_realtime = _config['MEDIA']['REALTIME']
     config.media_bgr = _config['MEDIA']['BGR']
+    config.media_enable_param = _config['MEDIA']['ENABLE_PARAM']
+    config.media_cv2_params = _config['MEDIA']['CV_PARAM']
 
     # Det
     config.det_model_type = _config['DET']['MODEL_TYPE']
