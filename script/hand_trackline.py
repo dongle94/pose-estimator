@@ -104,7 +104,7 @@ def main(opt):
 
             if ret:
                 x, y, score = _kept_preds[valid_hand_kept_idx][8]  # 8: index_finger tip
-                sign_points.append([int(x), int(y)])
+                sign_points.append([int(x), int(y), time.time()])
             if opt.show_all:
                 kept_preds = np.expand_dims(np.array(_kept_preds)[valid_hand_kept_idx], axis=0)
                 frame = vis_pose_result(frame,
@@ -117,19 +117,22 @@ def main(opt):
                 pre_x, pre_y = sign_points[idx - 1][0], sign_points[idx - 1][1]
                 cur_x, cur_y = pt[0], pt[1]
                 dist = math.dist([pre_x, pre_y], [cur_x, cur_y])
-                if dist > 100:
-                    thick = 4
-                elif dist > 50:
-                    thick = 5
-                else:
-                    thick = 6
-                cv2.line(
-                    frame,
-                    (sign_points[idx-1][0], sign_points[idx-1][1]),
-                    (pt[0], pt[1]),
-                    (255, 0, 0),
-                    thickness=thick
-                )
+
+                pre_t, cur_t = sign_points[idx - 1][2], pt[2]
+                if cur_t - pre_t < 0.1:
+                    if dist > 100:
+                        thick = 4
+                    elif dist > 50:
+                        thick = 5
+                    else:
+                        thick = 6
+                    cv2.line(
+                        frame,
+                        (sign_points[idx-1][0], sign_points[idx-1][1]),
+                        (pt[0], pt[1]),
+                        (255, 0, 0),
+                        thickness=thick
+                    )
 
         et = time.time()
         if media_loader.is_imgs:
@@ -202,7 +205,7 @@ def args_parse():
     parser.add_argument('-c', '--confidence', default=0.5, type=float,
                         help='hand keypoint score threshold')
     parser.add_argument('-b', '--bbox_area', default=0.02, type=float)
-    parser.add_argument('--angle', default=90, type=int)
+    parser.add_argument('--angle', default=60, type=int)
     _args = parser.parse_args()
     return _args
 
