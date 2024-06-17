@@ -5,6 +5,7 @@ import cv2
 import time
 import math
 import numpy as np
+from datetime import datetime
 from pathlib import Path
 
 FILE = Path(__file__).resolve()
@@ -42,11 +43,15 @@ def main(opt):
 
     sign_points = []
     m_w, m_h = media_loader.width, media_loader.height
+    fps = media_loader.dataset.fps
     roi_x1, roi_y1 = int(m_w * (0.5 - opt.roi_width / 2)), int(m_h * (0.5 - opt.roi_height / 2))
     roi_x2, roi_y2 = int(m_w * (0.5 + opt.roi_width / 2)), int(m_h * (0.5 + opt.roi_height / 2))
 
     if opt.save_path:
         os.makedirs(opt.save_path, exist_ok=True)
+
+    is_write = False
+    video_writer = None
 
     frame_idx = 0
     while True:
@@ -145,6 +150,13 @@ def main(opt):
 
         if opt.save_path:
             cv2.imwrite(os.path.join(opt.save_path, str(f"{frame_idx:04d}") + '.jpg'), frame)
+
+        if is_write:
+            video_writer.write(frame)
+            circle_x = 30
+            circle_y = 30
+            cv2.circle(frame, (circle_x, circle_y), 20, (0, 0, 255), -1)
+
         cv2.imshow('_', frame)
         key = cv2.waitKey(t)
         if key == ord('q'):
@@ -156,6 +168,19 @@ def main(opt):
             cv2.imwrite('./sign.jpg', frame)
         elif key == ord('c'):
             opt.show_all = not opt.show_all
+        elif key == ord('r'):
+            if is_write is False:
+                is_write = True
+                os.makedirs('./run', exist_ok=True)
+                now = datetime.now()
+                filename = os.path.join('./run', now.strftime("%Y-%m-%d_%H-%M-%S") + ".mp4")
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                video_writer = cv2.VideoWriter(filename, fourcc, fps, (m_w, m_h))
+                print("-- CV2 Video Recording Start --")
+            elif is_write is True:
+                is_write = False
+                video_writer.release()
+                print("-- CV2 Video Recording Stop --")
 
     print("-- Stop program --")
 
