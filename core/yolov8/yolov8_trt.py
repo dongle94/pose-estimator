@@ -157,21 +157,21 @@ if __name__ == "__main__":
     set_config('./configs/config.yaml')
     cfg = get_config()
 
-    yolov5 = Yolov8TRT(
+    yolov8 = Yolov8TRT(
         cfg.det_model_path, device=cfg.device, img_size=cfg.yolov5_img_size, fp16=cfg.det_half, auto=False,
         gpu_num=cfg.gpu_num, conf_thres=cfg.det_conf_thres, iou_thres=cfg.yolov5_nms_iou,
         agnostic=cfg.yolov5_agnostic_nms, max_det=cfg.yolov5_max_det, classes=cfg.det_obj_classes
     )
-    yolov5.warmup(img_size=(1, 3, cfg.yolov5_img_size, cfg.yolov5_img_size))
+    yolov8.warmup(img_size=(1, 3, cfg.yolov5_img_size, cfg.yolov5_img_size))
 
     _im = cv2.imread('./data/images/sample.jpg')
-    t0 = yolov5.get_time()
-    _im, _im0 = yolov5.preprocess(_im)
-    t1 = yolov5.get_time()
-    _y = yolov5.infer(_im)
-    t2 = yolov5.get_time()
-    _pred, _det = yolov5.postprocess(_y, _im.shape, _im0.shape)
-    t3 = yolov5.get_time()
+    t0 = yolov8.get_time()
+    _im, _im0 = yolov8.preprocess(_im)
+    t1 = yolov8.get_time()
+    _y = yolov8.infer(_im)
+    t2 = yolov8.get_time()
+    _pred, _det = yolov8.postprocess(_y, _im.shape, _im0.shape)
+    t3 = yolov8.get_time()
 
     for d in _det:
         cv2.rectangle(

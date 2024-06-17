@@ -180,7 +180,7 @@ if __name__ == "__main__":
             t = 0
         else:
             if et - st < wt:
-                t = int((wt - (et - st)) * 1000)
+                t = int((wt - (et - st)) * 1000) + 1
             else:
                 t = 1
 
