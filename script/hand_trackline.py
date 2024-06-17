@@ -105,7 +105,7 @@ def main(opt):
             hand_area = (bx2-bx1) * (by2-by1)
 
             ret = is_valid_hand_point(_kept_preds[valid_hand_kept_idx], roi_area, hand_area,
-                                      kept_score=opt.confidence, box_thres=opt.bbox_area, angle=opt.angle)
+                                      kept_score=opt.confidence, box_thres=opt.bbox_area, st_angle=opt.angle)
 
             if ret:
                 x, y, score = _kept_preds[valid_hand_kept_idx][8]  # 8: index_finger tip
@@ -185,17 +185,18 @@ def main(opt):
     print("-- Stop program --")
 
 
-def is_valid_hand_point(hand_point, roi_area, hand_box_area, kept_score=0.3, box_thres=0.05, angle=90):
+def is_valid_hand_point(hand_point, roi_area, hand_box_area, kept_score=0.3, box_thres=0.05, st_angle=90):
     ret = True
     x, y, score = hand_point[8]  # 8: index_finger tip
 
     # Score condition
     if score < kept_score:
+        print(f"Score is lower thand {kept_score}: {score}")
         ret = False
 
     # Area of Box condition
     if round(hand_box_area/roi_area, 4) < box_thres:
-        print("area:", round(hand_box_area / roi_area, 4))
+        print(f"Area is smaller than {box_thres}: {round(hand_box_area / roi_area, 4)}")
         ret = False
 
     # Angle condition
@@ -207,8 +208,8 @@ def is_valid_hand_point(hand_point, roi_area, hand_box_area, kept_score=0.3, box
     ba_norm, bc_norm = np.linalg.norm(ba), np.linalg.norm(bc)
     radi = np.arccos(np.clip(dot / (ba_norm * bc_norm) + 1e-8, -1.0, 1.0))
     angle = np.abs(radi * 180.0 / np.pi)
-    if angle < 90:
-        print("angle", angle)
+    if angle < st_angle:
+        print(f"Angle is lower than {st_angle}: {angle}")
         ret = False
 
     bench_y_0 = hand_point[18][1]
