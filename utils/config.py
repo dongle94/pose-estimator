@@ -25,6 +25,8 @@ def set_config(file):
     config.media_fps = _config['MEDIA']['FPS']
     config.media_realtime = _config['MEDIA']['REALTIME']
     config.media_bgr = _config['MEDIA']['BGR']
+    config.media_enable_param = _config['MEDIA']['ENABLE_PARAM']
+    config.media_cv2_params = _config['MEDIA']['CV_PARAM']
 
     # Det
     config.det_model_type = _config['DET']['MODEL_TYPE']
@@ -50,6 +52,7 @@ def set_config(file):
     config.kept_model_path = _config['KEPT']['MODEL_PATH']
     config.kept_half = _config['KEPT']['HALF']
     config.kept_img_size = _config['KEPT']['IMG_SIZE']
+    config.kept_format = _config['KEPT']['FORMAT']
 
     # HRNet
     config.hrnet_channel = _config['KEPT']['HRNET']['CHANNEL']

@@ -30,6 +30,7 @@ def convert(opt):
     flag = (1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
     network = builder.create_network(flag)
     parser = trt.OnnxParser(network, logger)
+
     if not parser.parse_from_file(str(onnx_file)):
         raise RuntimeError(f'failed to load ONNX file: {onnx_file}')
 

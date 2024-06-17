@@ -17,8 +17,6 @@ def convert(opt):
     print(f'starting export RTMPose with TensorRT {trt.__version__}...')
     assert onnx_file.exists(), f'failed to export ONNX file: {onnx_file}'
     f = onnx_file.with_suffix('.engine')  # TensorRT engine file
-    # data_format = 'fp16' if opt.fp16 else 'fp32'
-    # f = os.path.splitext(f)[0] + f"-{data_format}" + os.path.splitext(f)[1]
     logger = trt.Logger(trt.Logger.INFO)
     if opt.verbose:
         logger.min_severity = trt.Logger.Severity.VERBOSE

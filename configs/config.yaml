@@ -13,6 +13,11 @@ MEDIA:
   FPS: 30
   REALTIME: False
   BGR: True
+  ENABLE_PARAM: False
+  CV_PARAM:
+  - cv2.CAP_PROP_AUTO_EXPOSURE: 1
+  - cv2.CAP_PROP_BRIGHTNESS: 128
+  - cv2.CAP_PROP_EXPOSURE: 50
 
 # Object Detector
 DET:
@@ -36,10 +41,11 @@ YOLOV8:
 
 # Keypoint Detector
 KEPT:
-  MODEL_TYPE: "hrnet"     # hrnet
+  MODEL_TYPE: "hrnet"     # hrnet, rtmpose
   MODEL_PATH: './weights/hrnet_pose/hrnet_coco_w32_256x192.pth'
   HALF: False
   IMG_SIZE: [256, 192]    # [384,288], [256,192], [256,256]
+  FORMAT: 'coco'      # coco, mpii, coco-hand
 
   HRNET:
     CHANNEL: 32

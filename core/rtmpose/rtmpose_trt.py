@@ -17,13 +17,15 @@ from core.rtmpose.rtmpose_utils.postprocess import decode
 
 
 class RMTPoseTRT(object):
-    def __init__(self, weight: str, device: str = 'cpu', img_size: list = None, gpu_num: int = 0, fp16: bool = False):
+    def __init__(self, weight: str, device: str = 'cpu', img_size: list = None, gpu_num: int = 0, fp16: bool = False,
+                 dataset_format: str = 'coco'):
         super(RMTPoseTRT, self).__init__()
 
         self.img_size = img_size
         self.device = device
         self.gpu_num = gpu_num
         self.fp16 = True if fp16 is True else False
+        self.dataset = dataset_format
 
         self.trt_logger = trt.Logger(trt.Logger.INFO)
         trt.init_libnvinfer_plugins(self.trt_logger, namespace="")
@@ -35,6 +37,7 @@ class RMTPoseTRT(object):
         self.inputs = []
         self.outputs = []
         self.allocations = []
+
         for i in range(self.engine.num_io_tensors):
             name = self.engine.get_tensor_name(i)
             dtype = self.engine.get_tensor_dtype(name)
@@ -66,7 +69,6 @@ class RMTPoseTRT(object):
 
         self.mean = (123.675, 116.28, 103.53)
         self.std = (58.395, 57.12, 57.375)
-        self.dataset = "coco"
 
     def warmup(self, img_size=None):
         if img_size is None:
@@ -179,7 +181,8 @@ if __name__ == '__main__':
         device=_cfg.device,
         img_size=_cfg.kept_img_size,
         gpu_num=_cfg.gpu_num,
-        fp16=_cfg.kept_half
+        fp16=_cfg.kept_half,
+        dataset_format=_cfg.kept_format
     )
     _estimator.warmup()
 

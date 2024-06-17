@@ -3,9 +3,11 @@ import sys
 import cv2
 from pathlib import Path
 
-ROOT_PATH = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
-if ROOT_PATH not in sys.path:
-    sys.path.append(ROOT_PATH)
+FILE = Path(__file__).resolve()
+ROOT = FILE.parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))  # add ROOT to PATH
+os.chdir(ROOT)
 
 from core.medialoader import load_images, load_video, load_stream
 
@@ -47,6 +49,11 @@ class MediaLoader(object):
             dataset = load_stream.LoadStream(source, stride=self.stride, opt=self.opt, bgr=self.bgr, logger=logger)
         else:
             raise NotImplementedError(f'Invalid input: {source}')
+
+        if self.is_vid or self.is_stream:
+            self.width, self.height = dataset.w, dataset.h
+        else:       # self.is_imgs:
+            self.width, self.height = opt.media_width, opt.media_height
 
         self.dataset = dataset
 
