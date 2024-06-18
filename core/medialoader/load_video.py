@@ -11,9 +11,10 @@ VID_FORMATS = 'asf', 'avi', 'gif', 'm4v', 'mkv', 'mov', 'mp4', 'mpeg', 'mpg', 't
 
 
 class LoadVideo(LoadSample):
-    def __init__(self, path, stride=1, realtime=False, bgr=True):
+    def __init__(self, path, stride=1, realtime=False, bgr=True, logger=None):
         super().__init__()
 
+        self.logger = logger
         self.stride = stride
         self.realtime = realtime
         self.bgr = bgr
@@ -35,6 +36,11 @@ class LoadVideo(LoadSample):
         self.fps = max((fps if math.isfinite(fps) else 0) % 100, 0) or 30  # 30 FPS fallback
         self.frame = 0
         self.frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT) / self.stride)
+
+        if self.logger is not None:
+            self.logger.info(f"-- Load Video: {self.w}*{self.h}, FPS: {self.fps} --")
+        else:
+            print(f"-- Load Video: {self.w}*{self.h}, FPS: {self.fps} --")
 
         self.wait_ms = 1 / self.fps
         if self.realtime is True:

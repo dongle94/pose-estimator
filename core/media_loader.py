@@ -44,7 +44,8 @@ class MediaLoader(object):
         if self.is_imgs:
             dataset = load_images.LoadImages(source, bgr=self.bgr)
         elif self.is_vid:
-            dataset = load_video.LoadVideo(source, stride=self.stride, realtime=self.realtime, bgr=self.bgr)
+            dataset = load_video.LoadVideo(source, stride=self.stride, realtime=self.realtime, bgr=self.bgr,
+                                           logger=logger)
         elif self.is_stream:
             dataset = load_stream.LoadStream(source, stride=self.stride, opt=self.opt, bgr=self.bgr, logger=logger)
         else:
@@ -80,26 +81,25 @@ class MediaLoader(object):
 
 
 if __name__ == "__main__":
+    from utils.logger import init_logger, get_logger
     from utils.config import set_config, get_config
 
     # s = sys.argv[1]      # video file, webcam, rtsp stream... 0etc
     set_config('./configs/config.yaml')
     _cfg = get_config()
-    _bgr = getattr(_cfg, 'media_bgr', True)
-    _realtime = getattr(_cfg, 'media_realtime', False)
 
-    # _media_loader = MediaLoader(s, bgr=True)
-    _media_loader = MediaLoader(_cfg.media_source, bgr=_bgr, realtime=_realtime, opt=_cfg)
+    init_logger(_cfg)
+    _logger = get_logger()
+
+    _media_loader = MediaLoader(_cfg.media_source,
+                                logger=_logger,
+                                realtime=_cfg.media_realtime,
+                                bgr=_cfg.media_bgr,
+                                opt=_cfg)
+    print(f"-- Frame Metadata: {_media_loader.width}x{_media_loader.height}, FPS: {_media_loader.dataset.fps}")
     print("-- MediaLoader is ready")
 
     _title = 'frame'
-    wt = 30
-
-    _frame = _media_loader.get_frame()
-    print("-- Frame Metadata:", _frame.shape, _frame.dtype)
-
-    cv2.imshow(_title, _frame[..., ::-1])
-    cv2.waitKey(wt)
-
+    wt = int((0 if _media_loader.is_imgs else 1 / _media_loader.dataset.fps) * 1000)
     while True:
         _frame = _media_loader.show_frame(title=_title, wait_sec=wt)
