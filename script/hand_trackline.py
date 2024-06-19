@@ -191,7 +191,7 @@ def is_valid_hand_point(hand_point, roi_area, hand_box_area, kept_score=0.3, box
 
     # Score condition
     if score < kept_score:
-        print(f"Score is lower thand {kept_score}: {score}")
+        print(f"Score is lower than {kept_score}: {score}")
         ret = False
 
     # Area of Box condition
