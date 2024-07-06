@@ -9,3 +9,6 @@ cuda-python==11.8.2
 tensorrt-cu11==10.0.1
 tensorrt-cu11-bindings==10.0.1
 tensorrt-cu11-libs==10.0.1
+
+# Windows-TensorRT
+pypiwin32; platform_system == "Windows"
