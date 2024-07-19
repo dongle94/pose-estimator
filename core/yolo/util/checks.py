@@ -1,5 +1,6 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
 
+import glob
 import math
 import re
 from importlib import metadata
@@ -7,7 +8,13 @@ from pathlib import Path
 
 import torch
 
-from core.yolov8.yolov8_utils import emojis
+from core.yolo.util import (
+    ROOT,
+    clean_url,
+    downloads,
+    emojis,
+    url2file
+)
 
 
 def parse_version(version="0.0.0") -> tuple:
@@ -51,6 +58,8 @@ def check_imgsz(imgsz, stride=32, min_dim=1, max_dim=2, floor=0):
         imgsz = [imgsz]
     elif isinstance(imgsz, (list, tuple)):
         imgsz = list(imgsz)
+    elif isinstance(imgsz, str):  # i.e. '640' or '[640,640]'
+        imgsz = [int(imgsz)] if imgsz.isnumeric() else eval(imgsz)
     else:
         raise TypeError(
             f"'imgsz={imgsz}' is of invalid type {type(imgsz).__name__}. "
@@ -144,7 +153,7 @@ def check_version(
             result = False
         elif op == "!=" and c == v:
             result = False
-        elif op in (">=", "") and not (c >= v):  # if no constraint passed assume '>=required'
+        elif op in {">=", ""} and not (c >= v):  # if no constraint passed assume '>=required'
             result = False
         elif op == "<=" and not (c <= v):
             result = False
@@ -189,3 +198,36 @@ def check_yolov5u_filename(file: str, verbose: bool = True):
                     f"standard YOLOv5 models trained with https://github.com/ultralytics/yolov5.\n"
                 )
     return file
+
+
+def check_file(file, suffix="", download=True, hard=True):
+    """Search/download file (if necessary) and return path."""
+    check_suffix(file, suffix)  # optional
+    file = str(file).strip()  # convert to string and strip spaces
+    file = check_yolov5u_filename(file)  # yolov5n -> yolov5nu
+    if (
+        not file
+        or ("://" not in file and Path(file).exists())  # '://' check required in Windows Python<3.10
+        or file.lower().startswith("grpc://")
+    ):  # file exists or gRPC Triton images
+        return file
+    elif download and file.lower().startswith(("https://", "http://", "rtsp://", "rtmp://", "tcp://")):  # download
+        url = file  # warning: Pathlib turns :// -> :/
+        file = url2file(file)  # '%2F' to '/', split https://url.com/file.txt?auth
+        if Path(file).exists():
+            print(f"Found {clean_url(url)} locally at {file}")  # file already exists
+        else:
+            downloads.safe_download(url=url, file=file, unzip=False)
+        return file
+    else:  # search
+        files = glob.glob(str(ROOT / "**" / file), recursive=True) or glob.glob(str(ROOT.parent / file))  # find file
+        if not files and hard:
+            raise FileNotFoundError(f"'{file}' does not exist")
+        elif len(files) > 1 and hard:
+            raise FileNotFoundError(f"Multiple files match '{file}', specify exact path: {files}")
+        return files[0] if len(files) else []  # return file
+
+
+def check_yaml(file, suffix=(".yaml", ".yml"), hard=True):
+    """Search/download YAML file (if necessary) and return path, checking suffix."""
+    return check_file(file, suffix, hard=hard)

@@ -14,12 +14,11 @@ ROOT = FILE.parents[2]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
-from core.yolov8 import YOLOv8
-from core.yolov8.data.augment import LetterBox
-from core.yolov8.yolov8_utils.ops import scale_boxes, non_max_suppression_np, non_max_suppression
+from core.yolo.data.augment import LetterBox
+from core.yolo.util.ops import scale_boxes, non_max_suppression_np, non_max_suppression
 
 
-class Yolov8ORT(YOLOv8):
+class Yolov8ORT(object):
     def __init__(self, weight: str, device: str = 'cpu', img_size: int = 640, fp16: bool = False, auto: bool = False,
                  gpu_num: int = 0, conf_thres=0.25, iou_thres=0.45, agnostic=False, max_det=100,
                  classes: Union[list, None] = None, **kwargs):
@@ -142,9 +141,9 @@ if __name__ == "__main__":
     cfg = get_config()
 
     yolov8 = Yolov8ORT(
-        cfg.det_model_path, device=cfg.device, img_size=cfg.yolov5_img_size, fp16=cfg.det_half, auto=False,
-        gpu_num=cfg.gpu_num, conf_thres=cfg.det_conf_thres, iou_thres=cfg.yolov5_nms_iou,
-        agnostic=cfg.yolov5_agnostic_nms, max_det=cfg.yolov5_max_det, classes=cfg.det_obj_classes
+        cfg.det_model_path, device=cfg.device, img_size=cfg.yolo_img_size, fp16=cfg.det_half, auto=False,
+        gpu_num=cfg.gpu_num, conf_thres=cfg.det_conf_thres, iou_thres=cfg.yolo_nms_iou,
+        agnostic=cfg.yolo_agnostic_nms, max_det=cfg.yolo_max_det, classes=cfg.det_obj_classes
     )
     yolov8.warmup()
 

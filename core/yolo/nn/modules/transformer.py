@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from torch.nn.init import constant_, xavier_uniform_
 
 from .conv import Conv
-# from .utils import _get_clones, inverse_sigmoid, multi_scale_deformable_attn_pytorch
+from .utils import _get_clones, inverse_sigmoid, multi_scale_deformable_attn_pytorch
 
 __all__ = (
     "TransformerEncoderLayer",
@@ -18,9 +18,9 @@ __all__ = (
     "MLPBlock",
     "LayerNorm2d",
     "AIFI",
-    # "DeformableTransformerDecoder",
+    "DeformableTransformerDecoder",
     "DeformableTransformerDecoderLayer",
-    # "MSDeformAttn",
+    "MSDeformAttn",
     "MLP",
 )
 
@@ -31,7 +31,7 @@ class TransformerEncoderLayer(nn.Module):
     def __init__(self, c1, cm=2048, num_heads=8, dropout=0.0, act=nn.GELU(), normalize_before=False):
         """Initialize the TransformerEncoderLayer with specified parameters."""
         super().__init__()
-        from ...utils.torch_utils import TORCH_1_9
+        from ...util.torch_utils import TORCH_1_9
 
         if not TORCH_1_9:
             raise ModuleNotFoundError(
@@ -101,10 +101,10 @@ class AIFI(TransformerEncoderLayer):
     @staticmethod
     def build_2d_sincos_position_embedding(w, h, embed_dim=256, temperature=10000.0):
         """Builds 2D sine-cosine position embedding."""
-        grid_w = torch.arange(int(w), dtype=torch.float32)
-        grid_h = torch.arange(int(h), dtype=torch.float32)
-        grid_w, grid_h = torch.meshgrid(grid_w, grid_h, indexing="ij")
         assert embed_dim % 4 == 0, "Embed dimension must be divisible by 4 for 2D sin-cos position embedding"
+        grid_w = torch.arange(w, dtype=torch.float32)
+        grid_h = torch.arange(h, dtype=torch.float32)
+        grid_w, grid_h = torch.meshgrid(grid_w, grid_h, indexing="ij")
         pos_dim = embed_dim // 4
         omega = torch.arange(pos_dim, dtype=torch.float32) / pos_dim
         omega = 1.0 / (temperature**omega)
@@ -213,98 +213,98 @@ class LayerNorm2d(nn.Module):
         return self.weight[:, None, None] * x + self.bias[:, None, None]
 
 
-# class MSDeformAttn(nn.Module):
-#     """
-#     Multi-Scale Deformable Attention Module based on Deformable-DETR and PaddleDetection implementations.
-#
-#     https://github.com/fundamentalvision/Deformable-DETR/blob/main/models/ops/modules/ms_deform_attn.py
-#     """
-#
-#     def __init__(self, d_model=256, n_levels=4, n_heads=8, n_points=4):
-#         """Initialize MSDeformAttn with the given parameters."""
-#         super().__init__()
-#         if d_model % n_heads != 0:
-#             raise ValueError(f"d_model must be divisible by n_heads, but got {d_model} and {n_heads}")
-#         _d_per_head = d_model // n_heads
-#         # Better to set _d_per_head to a power of 2 which is more efficient in a CUDA implementation
-#         assert _d_per_head * n_heads == d_model, "`d_model` must be divisible by `n_heads`"
-#
-#         self.im2col_step = 64
-#
-#         self.d_model = d_model
-#         self.n_levels = n_levels
-#         self.n_heads = n_heads
-#         self.n_points = n_points
-#
-#         self.sampling_offsets = nn.Linear(d_model, n_heads * n_levels * n_points * 2)
-#         self.attention_weights = nn.Linear(d_model, n_heads * n_levels * n_points)
-#         self.value_proj = nn.Linear(d_model, d_model)
-#         self.output_proj = nn.Linear(d_model, d_model)
-#
-#         self._reset_parameters()
-#
-#     def _reset_parameters(self):
-#         """Reset module parameters."""
-#         constant_(self.sampling_offsets.weight.data, 0.0)
-#         thetas = torch.arange(self.n_heads, dtype=torch.float32) * (2.0 * math.pi / self.n_heads)
-#         grid_init = torch.stack([thetas.cos(), thetas.sin()], -1)
-#         grid_init = (
-#             (grid_init / grid_init.abs().max(-1, keepdim=True)[0])
-#             .view(self.n_heads, 1, 1, 2)
-#             .repeat(1, self.n_levels, self.n_points, 1)
-#         )
-#         for i in range(self.n_points):
-#             grid_init[:, :, i, :] *= i + 1
-#         with torch.no_grad():
-#             self.sampling_offsets.bias = nn.Parameter(grid_init.view(-1))
-#         constant_(self.attention_weights.weight.data, 0.0)
-#         constant_(self.attention_weights.bias.data, 0.0)
-#         xavier_uniform_(self.value_proj.weight.data)
-#         constant_(self.value_proj.bias.data, 0.0)
-#         xavier_uniform_(self.output_proj.weight.data)
-#         constant_(self.output_proj.bias.data, 0.0)
-#
-#     def forward(self, query, refer_bbox, value, value_shapes, value_mask=None):
-#         """
-#         Perform forward pass for multiscale deformable attention.
-#
-#         https://github.com/PaddlePaddle/PaddleDetection/blob/develop/ppdet/modeling/transformers/deformable_transformer.py
-#
-#         Args:
-#             query (torch.Tensor): [bs, query_length, C]
-#             refer_bbox (torch.Tensor): [bs, query_length, n_levels, 2], range in [0, 1], top-left (0,0),
-#                 bottom-right (1, 1), including padding area
-#             value (torch.Tensor): [bs, value_length, C]
-#             value_shapes (List): [n_levels, 2], [(H_0, W_0), (H_1, W_1), ..., (H_{L-1}, W_{L-1})]
-#             value_mask (Tensor): [bs, value_length], True for non-padding elements, False for padding elements
-#
-#         Returns:
-#             output (Tensor): [bs, Length_{query}, C]
-#         """
-#         bs, len_q = query.shape[:2]
-#         len_v = value.shape[1]
-#         assert sum(s[0] * s[1] for s in value_shapes) == len_v
-#
-#         value = self.value_proj(value)
-#         if value_mask is not None:
-#             value = value.masked_fill(value_mask[..., None], float(0))
-#         value = value.view(bs, len_v, self.n_heads, self.d_model // self.n_heads)
-#         sampling_offsets = self.sampling_offsets(query).view(bs, len_q, self.n_heads, self.n_levels, self.n_points, 2)
-#         attention_weights = self.attention_weights(query).view(bs, len_q, self.n_heads, self.n_levels * self.n_points)
-#         attention_weights = F.softmax(attention_weights, -1).view(bs, len_q, self.n_heads, self.n_levels, self.n_points)
-#         # N, Len_q, n_heads, n_levels, n_points, 2
-#         num_points = refer_bbox.shape[-1]
-#         if num_points == 2:
-#             offset_normalizer = torch.as_tensor(value_shapes, dtype=query.dtype, device=query.device).flip(-1)
-#             add = sampling_offsets / offset_normalizer[None, None, None, :, None, :]
-#             sampling_locations = refer_bbox[:, :, None, :, None, :] + add
-#         elif num_points == 4:
-#             add = sampling_offsets / self.n_points * refer_bbox[:, :, None, :, None, 2:] * 0.5
-#             sampling_locations = refer_bbox[:, :, None, :, None, :2] + add
-#         else:
-#             raise ValueError(f"Last dim of reference_points must be 2 or 4, but got {num_points}.")
-#         output = multi_scale_deformable_attn_pytorch(value, value_shapes, sampling_locations, attention_weights)
-#         return self.output_proj(output)
+class MSDeformAttn(nn.Module):
+    """
+    Multiscale Deformable Attention Module based on Deformable-DETR and PaddleDetection implementations.
+
+    https://github.com/fundamentalvision/Deformable-DETR/blob/main/models/ops/modules/ms_deform_attn.py
+    """
+
+    def __init__(self, d_model=256, n_levels=4, n_heads=8, n_points=4):
+        """Initialize MSDeformAttn with the given parameters."""
+        super().__init__()
+        if d_model % n_heads != 0:
+            raise ValueError(f"d_model must be divisible by n_heads, but got {d_model} and {n_heads}")
+        _d_per_head = d_model // n_heads
+        # Better to set _d_per_head to a power of 2 which is more efficient in a CUDA implementation
+        assert _d_per_head * n_heads == d_model, "`d_model` must be divisible by `n_heads`"
+
+        self.im2col_step = 64
+
+        self.d_model = d_model
+        self.n_levels = n_levels
+        self.n_heads = n_heads
+        self.n_points = n_points
+
+        self.sampling_offsets = nn.Linear(d_model, n_heads * n_levels * n_points * 2)
+        self.attention_weights = nn.Linear(d_model, n_heads * n_levels * n_points)
+        self.value_proj = nn.Linear(d_model, d_model)
+        self.output_proj = nn.Linear(d_model, d_model)
+
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        """Reset module parameters."""
+        constant_(self.sampling_offsets.weight.data, 0.0)
+        thetas = torch.arange(self.n_heads, dtype=torch.float32) * (2.0 * math.pi / self.n_heads)
+        grid_init = torch.stack([thetas.cos(), thetas.sin()], -1)
+        grid_init = (
+            (grid_init / grid_init.abs().max(-1, keepdim=True)[0])
+            .view(self.n_heads, 1, 1, 2)
+            .repeat(1, self.n_levels, self.n_points, 1)
+        )
+        for i in range(self.n_points):
+            grid_init[:, :, i, :] *= i + 1
+        with torch.no_grad():
+            self.sampling_offsets.bias = nn.Parameter(grid_init.view(-1))
+        constant_(self.attention_weights.weight.data, 0.0)
+        constant_(self.attention_weights.bias.data, 0.0)
+        xavier_uniform_(self.value_proj.weight.data)
+        constant_(self.value_proj.bias.data, 0.0)
+        xavier_uniform_(self.output_proj.weight.data)
+        constant_(self.output_proj.bias.data, 0.0)
+
+    def forward(self, query, refer_bbox, value, value_shapes, value_mask=None):
+        """
+        Perform forward pass for multiscale deformable attention.
+
+        https://github.com/PaddlePaddle/PaddleDetection/blob/develop/ppdet/modeling/transformers/deformable_transformer.py
+
+        Args:
+            query (torch.Tensor): [bs, query_length, C]
+            refer_bbox (torch.Tensor): [bs, query_length, n_levels, 2], range in [0, 1], top-left (0,0),
+                bottom-right (1, 1), including padding area
+            value (torch.Tensor): [bs, value_length, C]
+            value_shapes (List): [n_levels, 2], [(H_0, W_0), (H_1, W_1), ..., (H_{L-1}, W_{L-1})]
+            value_mask (Tensor): [bs, value_length], True for non-padding elements, False for padding elements
+
+        Returns:
+            output (Tensor): [bs, Length_{query}, C]
+        """
+        bs, len_q = query.shape[:2]
+        len_v = value.shape[1]
+        assert sum(s[0] * s[1] for s in value_shapes) == len_v
+
+        value = self.value_proj(value)
+        if value_mask is not None:
+            value = value.masked_fill(value_mask[..., None], float(0))
+        value = value.view(bs, len_v, self.n_heads, self.d_model // self.n_heads)
+        sampling_offsets = self.sampling_offsets(query).view(bs, len_q, self.n_heads, self.n_levels, self.n_points, 2)
+        attention_weights = self.attention_weights(query).view(bs, len_q, self.n_heads, self.n_levels * self.n_points)
+        attention_weights = F.softmax(attention_weights, -1).view(bs, len_q, self.n_heads, self.n_levels, self.n_points)
+        # N, Len_q, n_heads, n_levels, n_points, 2
+        num_points = refer_bbox.shape[-1]
+        if num_points == 2:
+            offset_normalizer = torch.as_tensor(value_shapes, dtype=query.dtype, device=query.device).flip(-1)
+            add = sampling_offsets / offset_normalizer[None, None, None, :, None, :]
+            sampling_locations = refer_bbox[:, :, None, :, None, :] + add
+        elif num_points == 4:
+            add = sampling_offsets / self.n_points * refer_bbox[:, :, None, :, None, 2:] * 0.5
+            sampling_locations = refer_bbox[:, :, None, :, None, :2] + add
+        else:
+            raise ValueError(f"Last dim of reference_points must be 2 or 4, but got {num_points}.")
+        output = multi_scale_deformable_attn_pytorch(value, value_shapes, sampling_locations, attention_weights)
+        return self.output_proj(output)
 
 
 class DeformableTransformerDecoderLayer(nn.Module):
@@ -370,57 +370,57 @@ class DeformableTransformerDecoderLayer(nn.Module):
         return self.forward_ffn(embed)
 
 
-# class DeformableTransformerDecoder(nn.Module):
-#     """
-#     Implementation of Deformable Transformer Decoder based on PaddleDetection.
-#
-#     https://github.com/PaddlePaddle/PaddleDetection/blob/develop/ppdet/modeling/transformers/deformable_transformer.py
-#     """
-#
-#     def __init__(self, hidden_dim, decoder_layer, num_layers, eval_idx=-1):
-#         """Initialize the DeformableTransformerDecoder with the given parameters."""
-#         super().__init__()
-#         self.layers = _get_clones(decoder_layer, num_layers)
-#         self.num_layers = num_layers
-#         self.hidden_dim = hidden_dim
-#         self.eval_idx = eval_idx if eval_idx >= 0 else num_layers + eval_idx
-#
-#     def forward(
-#         self,
-#         embed,  # decoder embeddings
-#         refer_bbox,  # anchor
-#         feats,  # image features
-#         shapes,  # feature shapes
-#         bbox_head,
-#         score_head,
-#         pos_mlp,
-#         attn_mask=None,
-#         padding_mask=None,
-#     ):
-#         """Perform the forward pass through the entire decoder."""
-#         output = embed
-#         dec_bboxes = []
-#         dec_cls = []
-#         last_refined_bbox = None
-#         refer_bbox = refer_bbox.sigmoid()
-#         for i, layer in enumerate(self.layers):
-#             output = layer(output, refer_bbox, feats, shapes, padding_mask, attn_mask, pos_mlp(refer_bbox))
-#
-#             bbox = bbox_head[i](output)
-#             refined_bbox = torch.sigmoid(bbox + inverse_sigmoid(refer_bbox))
-#
-#             if self.training:
-#                 dec_cls.append(score_head[i](output))
-#                 if i == 0:
-#                     dec_bboxes.append(refined_bbox)
-#                 else:
-#                     dec_bboxes.append(torch.sigmoid(bbox + inverse_sigmoid(last_refined_bbox)))
-#             elif i == self.eval_idx:
-#                 dec_cls.append(score_head[i](output))
-#                 dec_bboxes.append(refined_bbox)
-#                 break
-#
-#             last_refined_bbox = refined_bbox
-#             refer_bbox = refined_bbox.detach() if self.training else refined_bbox
-#
-#         return torch.stack(dec_bboxes), torch.stack(dec_cls)
+class DeformableTransformerDecoder(nn.Module):
+    """
+    Implementation of Deformable Transformer Decoder based on PaddleDetection.
+
+    https://github.com/PaddlePaddle/PaddleDetection/blob/develop/ppdet/modeling/transformers/deformable_transformer.py
+    """
+
+    def __init__(self, hidden_dim, decoder_layer, num_layers, eval_idx=-1):
+        """Initialize the DeformableTransformerDecoder with the given parameters."""
+        super().__init__()
+        self.layers = _get_clones(decoder_layer, num_layers)
+        self.num_layers = num_layers
+        self.hidden_dim = hidden_dim
+        self.eval_idx = eval_idx if eval_idx >= 0 else num_layers + eval_idx
+
+    def forward(
+        self,
+        embed,  # decoder embeddings
+        refer_bbox,  # anchor
+        feats,  # image features
+        shapes,  # feature shapes
+        bbox_head,
+        score_head,
+        pos_mlp,
+        attn_mask=None,
+        padding_mask=None,
+    ):
+        """Perform the forward pass through the entire decoder."""
+        output = embed
+        dec_bboxes = []
+        dec_cls = []
+        last_refined_bbox = None
+        refer_bbox = refer_bbox.sigmoid()
+        for i, layer in enumerate(self.layers):
+            output = layer(output, refer_bbox, feats, shapes, padding_mask, attn_mask, pos_mlp(refer_bbox))
+
+            bbox = bbox_head[i](output)
+            refined_bbox = torch.sigmoid(bbox + inverse_sigmoid(refer_bbox))
+
+            if self.training:
+                dec_cls.append(score_head[i](output))
+                if i == 0:
+                    dec_bboxes.append(refined_bbox)
+                else:
+                    dec_bboxes.append(torch.sigmoid(bbox + inverse_sigmoid(last_refined_bbox)))
+            elif i == self.eval_idx:
+                dec_cls.append(score_head[i](output))
+                dec_bboxes.append(refined_bbox)
+                break
+
+            last_refined_bbox = refined_bbox
+            refer_bbox = refined_bbox.detach() if self.training else refined_bbox
+
+        return torch.stack(dec_bboxes), torch.stack(dec_cls)

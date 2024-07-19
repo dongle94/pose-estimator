@@ -11,15 +11,14 @@ ROOT = FILE.parents[2]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
-from core.yolov8 import YOLOv8
-from core.yolov8.yolov8_utils.torch_utils import select_device
-from core.yolov8.yolov8_utils.checks import check_imgsz
-from core.yolov8.yolov8_utils.ops import non_max_suppression, scale_boxes
-from core.yolov8.nn.tasks import attempt_load_weights
-from core.yolov8.data.augment import LetterBox
+from core.yolo.util.torch_utils import select_device
+from core.yolo.util.checks import check_imgsz
+from core.yolo.util.ops import non_max_suppression, scale_boxes
+from core.yolo.nn.tasks import attempt_load_weights
+from core.yolo.data.augment import LetterBox
 
 
-class Yolov8Torch(YOLOv8):
+class Yolov8Torch(object):
     def __init__(self, weight: str, device: str = 'cpu', img_size: int = 640, fp16: bool = False, auto: bool = False,
                  fuse: bool = True, gpu_num: int = 0, conf_thres=0.25, iou_thres=0.45, agnostic=False, max_det=100,
                  classes: Union[list, None] = None, **kwargs):
@@ -52,7 +51,7 @@ class Yolov8Torch(YOLOv8):
         im = torch.empty(*img_size, dtype=torch.half if self.fp16 else torch.float, device=self.device)
         t = self.get_time()
         self.infer(im)
-        print(f"-- Yolov8 Detector warmup: {time.time()-t:.6f} sec --")
+        print(f"-- YOLOv8 Detector warmup: {time.time()-t:.6f} sec --")
 
     def preprocess(self, img):
         im = self.letter_box(image=img)
@@ -97,9 +96,9 @@ if __name__ == "__main__":
     set_config('./configs/config.yaml')
     cfg = get_config()
 
-    yolov8 = Yolov8Torch(cfg.det_model_path, device=cfg.device, img_size=cfg.yolov8_img_size, fp16=cfg.det_half,
-                         gpu_num=cfg.gpu_num, conf_thres=cfg.det_conf_thres, iou_thres=cfg.yolov8_nms_iou,
-                         agnostic=cfg.yolov8_agnostic_nms, max_dets=cfg.yolov8_max_det, classes=cfg.det_obj_classes)
+    yolov8 = Yolov8Torch(cfg.det_model_path, device=cfg.device, img_size=cfg.yolo_img_size, fp16=cfg.det_half,
+                         gpu_num=cfg.gpu_num, conf_thres=cfg.det_conf_thres, iou_thres=cfg.yolo_nms_iou,
+                         agnostic=cfg.yolo_agnostic_nms, max_det=cfg.yolo_max_det, classes=cfg.det_obj_classes)
     yolov8.warmup()
 
     _im = cv2.imread('./data/images/sample.jpg')
