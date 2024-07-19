@@ -26,11 +26,11 @@ class ObjectDetector(object):
 
         self.framework = None
 
-        if self.detector_type in ["yolov5", "yolov8"]:
-            img_size = cfg.yolov5_img_size
-            iou_thres = cfg.yolov5_nms_iou
-            agnostic = cfg.yolov5_agnostic_nms
-            max_det = cfg.yolov5_max_det
+        if self.detector_type in ["yolov5", "yolov8", "yolov10"]:
+            img_size = cfg.yolo_img_size
+            iou_thres = cfg.yolo_nms_iou
+            agnostic = cfg.yolo_agnostic_nms
+            max_det = cfg.yolo_max_det
             self.im_shape = None
             self.im0_shape = None
             if self.detector_type == "yolov5":
@@ -54,19 +54,27 @@ class ObjectDetector(object):
                 # model load with weight
                 ext = os.path.splitext(weight)[1]
                 if ext in ['.pt', '.pth']:
-                    from core.yolov8.yolov8_pt import Yolov8Torch
+                    from core.yolo.yolov8_pt import Yolov8Torch
                     model = Yolov8Torch
                     self.framework = 'torch'
                 elif ext == '.onnx':
-                    from core.yolov8.yolov8_ort import Yolov8ORT
+                    from core.yolo.yolov8_ort import Yolov8ORT
                     model = Yolov8ORT
                     self.framework = 'onnx'
                 elif ext in ['.engine', '.bin']:
-                    from core.yolov8.yolov8_trt import Yolov8TRT
+                    from core.yolo.yolov8_trt import Yolov8TRT
                     model = Yolov8TRT
                     self.framework = 'trt'
                 else:
                     raise FileNotFoundError('No Yolov8 weight File!')
+            elif self.detector_type == "yolov10":
+                ext = os.path.splitext(weight)[1]
+                if ext in ['.pt', '.pth']:
+                    from core.yolo.yolov10_pt import Yolov10Torch
+                    model = Yolov10Torch
+                    self.framework = 'torch'
+                else:
+                    raise FileNotFoundError('No Yolov10 weight File!')
             else:
                 raise NotImplementedError(f'Unknown detector type: {self.detector_type}')
             self.detector = model(
@@ -92,7 +100,7 @@ class ObjectDetector(object):
         self.ts = [0., 0., 0.]
 
     def run(self, img):
-        if self.detector_type in ["yolov5", "yolov8"]:
+        if self.detector_type in ["yolov5", "yolov8", "yolov10"]:
             t0 = self.detector.get_time()
 
             img, orig_img = self.detector.preprocess(img)

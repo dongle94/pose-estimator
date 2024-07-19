@@ -21,28 +21,21 @@ MEDIA:
 
 # Object Detector
 DET:
-  MODEL_TYPE: yolov8
-  DET_MODEL_PATH: './weights/yolov8/yolov8m.pt'
+  MODEL_TYPE: yolov10
+  DET_MODEL_PATH: './weights/yolov10/yolov10m.pt'
   HALF: False
   CONF_THRES: 0.5
   OBJ_CLASSES: [0]
-
-YOLOV5:
-  IMG_SIZE: 640
-  NMS_IOU: 0.45
-  AGNOSTIC_NMS: True
-  MAX_DET: 100
-
-YOLOV8:
-  IMG_SIZE: 640
-  NMS_IOU: 0.45
-  AGNOSTIC_NMS: False
-  MAX_DET: 100
+  YOLO:
+    IMG_SIZE: 640
+    NMS_IOU: 0.45
+    AGNOSTIC_NMS: True
+    MAX_DET: 100
 
 # Keypoint Detector
 KEPT:
-  MODEL_TYPE: "hrnet"     # hrnet, rtmpose
-  MODEL_PATH: './weights/hrnet_pose/hrnet_coco_w32_256x192.pth'
+  MODEL_TYPE: "rtmpose"     # hrnet, rtmpose
+  MODEL_PATH: './weights/rtmpose/rtmpose-l_coco_256x192.onnx'
   HALF: False
   IMG_SIZE: [256, 192]    # [384,288], [256,192], [256,256]
   FORMAT: 'coco'      # coco, mpii, coco-hand

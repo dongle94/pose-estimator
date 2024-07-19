@@ -1,13 +1,17 @@
-import os
-import re
-import platform
-import urllib
-import yaml
+# Ultralytics YOLO 🚀, AGPL-3.0 license
+
 import contextlib
-import matplotlib.pyplot as plt
+import os
+import platform
+import re
+import urllib
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Union
+
+import matplotlib.pyplot as plt
+import yaml
 from tqdm import tqdm as tqdm_original
 
 # PyTorch Multi-GPU DDP Constants
@@ -28,12 +32,15 @@ class TQDM(tqdm_original):
 
     Args:
         *args (list): Positional arguments passed to original tqdm.
-        **kwargs (dict): Keyword arguments, with custom defaults applied.
+        **kwargs (any): Keyword arguments, with custom defaults applied.
     """
 
     def __init__(self, *args, **kwargs):
-        """Initialize custom Ultralytics tqdm class with different default arguments."""
-        # Set new default values (these can still be overridden when calling TQDM)
+        """
+        Initialize custom Ultralytics tqdm class with different default arguments.
+
+        Note these can still be overridden when calling TQDM.
+        """
         kwargs["disable"] = not VERBOSE or kwargs.get("disable", False)  # logical 'and' with default value if passed
         kwargs.setdefault("bar_format", TQDM_BAR_FORMAT)  # override default value if passed
         super().__init__(*args, **kwargs)
@@ -94,7 +101,7 @@ def plt_settings(rcparams=None, backend="Agg"):
         def wrapper(*args, **kwargs):
             """Sets rc parameters and backend, calls the original function, and restores the settings."""
             original_backend = plt.get_backend()
-            if backend != original_backend:
+            if backend.lower() != original_backend.lower():
                 plt.close("all")  # auto-close()ing of figures upon backend switching is deprecated since 3.8
                 plt.switch_backend(backend)
 
@@ -159,7 +166,7 @@ def yaml_load(file="data.yaml", append_filename=False):
     Returns:
         (dict): YAML data and file name.
     """
-    assert Path(file).suffix in (".yaml", ".yml"), f"Attempting to load non-YAML file {file} with yaml_load()"
+    assert Path(file).suffix in {".yaml", ".yml"}, f"Attempting to load non-YAML file {file} with yaml_load()"
     with open(file, errors="ignore", encoding="utf-8") as f:
         s = f.read()  # string
 
@@ -185,16 +192,12 @@ def is_online() -> bool:
     Returns:
         (bool): True if connection is successful, False otherwise.
     """
-    import socket
+    with contextlib.suppress(Exception):
+        assert str(os.getenv("YOLO_OFFLINE", "")).lower() != "true"  # check if ENV var YOLO_OFFLINE="True"
+        import socket
 
-    for host in "1.1.1.1", "8.8.8.8", "223.5.5.5":  # Cloudflare, Google, AliDNS:
-        try:
-            test_connection = socket.create_connection(address=(host, 53), timeout=2)
-        except (socket.timeout, socket.gaierror, OSError):
-            continue
-        else:
-            # If the connection was successful, close it to avoid a ResourceWarning
-            test_connection.close()
+        for dns in ("1.1.1.1", "8.8.8.8"):  # check Cloudflare and Google DNS
+            socket.create_connection(address=(dns, 80), timeout=2.0).close()
             return True
     return False
 
@@ -225,9 +228,9 @@ def get_git_dir():
             return d
 
 
-def get_user_config_dir(sub_dir="Ultralytics"):
+def get_user_config_dir(sub_dir="yolo"):
     """
-    Get the user config directory.
+    Return the appropriate config directory based on the environment operating system.
 
     Args:
         sub_dir (str): The name of the subdirectory to create.
@@ -235,7 +238,6 @@ def get_user_config_dir(sub_dir="Ultralytics"):
     Returns:
         (Path): The path to the user config directory.
     """
-    # Return the appropriate config directory for each operating system
     if WINDOWS:
         path = Path.home() / "AppData" / "Roaming" / sub_dir
     elif MACOS:  # macOS
@@ -259,15 +261,26 @@ def get_user_config_dir(sub_dir="Ultralytics"):
     return path
 
 
-USER_CONFIG_DIR = Path(os.getenv("YOLO_CONFIG_DIR") or get_user_config_dir())  # Ultralytics settings dir
+GIT_DIR = get_git_dir()
+USER_CONFIG_DIR = Path(os.getenv("YOLO_CONFIG_DIR") or get_user_config_dir())  # core/yolo settings dir
 SETTINGS_YAML = USER_CONFIG_DIR / "settings.yaml"
 
 
 class TryExcept(contextlib.ContextDecorator):
     """
-    YOLOv8 TryExcept class.
+    Ultralytics TryExcept class. Use as @TryExcept() decorator or 'with TryExcept():' context manager.
 
-    Use as @TryExcept() decorator or 'with TryExcept():' context manager.
+    Examples:
+        As a decorator:
+        >>> @TryExcept(msg="Error occurred in func", verbose=True)
+        >>> def func():
+        >>>    # Function logic here
+        >>>     pass
+
+        As a context manager:
+        >>> with TryExcept(msg="Error occurred in block", verbose=True):
+        >>>     # Code block here
+        >>>     pass
     """
 
     def __init__(self, msg="", verbose=True):
@@ -305,9 +318,8 @@ class SettingsManager(dict):
         from .checks import check_version
         from .torch_utils import torch_distributed_zero_first
 
-        git_dir = get_git_dir()
-        root = git_dir or Path()
-        datasets_root = (root.parent if git_dir and is_dir_writeable(root.parent) else root).resolve()
+        root = GIT_DIR or Path()
+        datasets_root = (root.parent if GIT_DIR and is_dir_writeable(root.parent) else root).resolve()
 
         self.file = Path(file)
         self.version = version
@@ -341,14 +353,24 @@ class SettingsManager(dict):
             correct_keys = self.keys() == self.defaults.keys()
             correct_types = all(type(a) is type(b) for a, b in zip(self.values(), self.defaults.values()))
             correct_version = check_version(self["settings_version"], self.version)
+            help_msg = (
+                f"\nView settings with 'yolo settings' or at '{self.file}'"
+                "\nUpdate settings with 'yolo settings key=value', i.e. 'yolo settings runs_dir=path/to/dir'. "
+                "For help see https://docs.ultralytics.com/quickstart/#ultralytics-settings."
+            )
             if not (correct_keys and correct_types and correct_version):
                 print(
                     "WARNING ⚠️ Ultralytics settings reset to default values. This may be due to a possible problem "
-                    "with your settings or a recent ultralytics package update. "
-                    f"\nView settings with 'yolo settings' or at '{self.file}'"
-                    "\nUpdate settings with 'yolo settings key=value', i.e. 'yolo settings runs_dir=path/to/dir'."
+                    f"with your settings or a recent ultralytics package update. {help_msg}"
                 )
                 self.reset()
+
+            if self.get("datasets_dir") == self.get("runs_dir"):
+                print(
+                    f"WARNING ⚠️ Ultralytics setting 'datasets_dir: {self.get('datasets_dir')}' "
+                    f"must be different than 'runs_dir: {self.get('runs_dir')}'. "
+                    f"Please change one to avoid possible issues during training. {help_msg}"
+                )
 
     def load(self):
         """Loads settings from the YAML file."""
@@ -381,7 +403,7 @@ def url2file(url):
     return Path(clean_url(url)).name
 
 
-# Run below code on utils init ------------------------------------------------------------------------------------
+# Run below code on util init ------------------------------------------------------------------------------------
 
 # Check first-install steps
 SETTINGS = SettingsManager()  # initialize settings
