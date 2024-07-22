@@ -404,7 +404,8 @@ def torch_safe_load(weight):
     try:
         with temporary_modules(
             modules={
-                "ultralytics": "core.yolo"
+                "ultralytics": "core.yolo",
+                "ultralytics.utils": "core.yolo.util"
                 # "ultralytics.yolo.utils": "ultralytics.utils",
                 # "ultralytics.yolo.v8": "ultralytics.models.yolo",
                 # "ultralytics.yolo.data": "ultralytics.data",
