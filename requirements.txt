@@ -1,3 +1,4 @@
 -r requirements/common.txt
+-r requirements/yolo.txt
 -r requirements/pose.txt
 -r requirements/optimization.txt
