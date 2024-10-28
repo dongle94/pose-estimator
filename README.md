@@ -20,15 +20,17 @@ $ pip install -r ./requirements.txt
 ## Modules
 - medialoader
 - object detectors
-  - yolov5
+  - YOLOv5
     - pytorch, onnx, trt
-  - yolov8
+  - YOLOv8
     - pytorch, onnx, trt
 - pose estimator
-  - hrnet
+  - HRNet
     - pytorch, onnx, trt
-  - rtmpose
+  - RTMPose
     - onnx, trt
+  - ViTPose
+    - pytorch
 
 ## Reference
 - YOLOv5: https://github.com/ultralytics/yolov5
@@ -36,3 +38,6 @@ $ pip install -r ./requirements.txt
 - PoseHRNet: https://github.com/HRNet/HRNet-Human-Pose-Estimation
 - RTMPose: https://github.com/open-mmlab/mmpose/tree/dev-1.x/projects/rtmpose
   - RTMPose-hand: https://github.com/open-mmlab/mmpose/tree/main/projects/rtmpose#hand-2d-21-keypoints
+- ViTPose:
+  - https://github.com/ViTAE-Transformer/ViTPose
+  - https://github.com/JunkyByte/easy_ViTPose
