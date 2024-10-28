@@ -79,6 +79,24 @@ class PoseEstimator(object):
                 fp16=fp16,
                 dataset_format=self.kept_format
             )
+        elif self.estimator_type == 'vitpose':
+            model_name = cfg.vitpose_name
+            ext = os.path.splitext(weight)[1]
+            if ext in [".pt", ".pth"]:
+                from core.vitpose.vitpose_pt import ViTPoseTorch
+                model = ViTPoseTorch
+                self.framework = 'torch'
+            else:
+                raise FileNotFoundError("No vitpose weight File!")
+            self.estimator = model(
+                weight=weight,
+                device=device,
+                gpu_num=gpu_num,
+                img_size=img_size,
+                fp16=fp16,
+                dataset_format=self.kept_format,
+                model_size=model_name
+            )
         else:
             raise NotImplementedError(f'Unknown estimator type: {self.estimator_type}')
 
@@ -108,20 +126,34 @@ class PoseEstimator(object):
             )
 
             t3 = self.estimator.get_time()
+        elif self.estimator_type in ['vitpose']:
+            t0 = self.estimator.get_time()
+            inp, pads, orig_wh, bboxes = self.estimator.preprocess(img, boxes)
 
-            # calculate time & logging
-            self.f_cnt += 1
-            self.ts[0] += t1 - t0
-            self.ts[1] += t2 - t1
-            self.ts[2] += t3 - t2
-            if self.f_cnt % self.cfg.console_log_interval == 0:
-                self.logger.debug(
-                    f"{self.estimator_type} estimator {self.f_cnt} Frames average time - "
-                    f"preproc: {self.ts[0] / self.f_cnt:.6f} sec / "
-                    f"infer: {self.ts[1] / self.f_cnt:.6f} sec / "
-                    f"postproc: {self.ts[2] / self.f_cnt:.6f} sec")
+            t1 = self.estimator.get_time()
+            kept_pred = self.estimator.infer(inp)
+
+            t2 = self.estimator.get_time()
+            kept_pred = self.estimator.postprocess(
+                kept_pred, orig_wh, pads, bboxes
+            )
+            kept_pred = np.array(kept_pred)
+            raw_heatmaps = None
+            t3 = self.estimator.get_time()
         else:
-            kept_pred, raw_heatmaps = None, None
+            raise NotImplementedError(f'Unknown estimator type: {self.estimator_type}')
+
+        # calculate time & logging
+        self.f_cnt += 1
+        self.ts[0] += t1 - t0
+        self.ts[1] += t2 - t1
+        self.ts[2] += t3 - t2
+        if self.f_cnt % self.cfg.console_log_interval == 0:
+            self.logger.debug(
+                f"{self.estimator_type} estimator {self.f_cnt} Frames average time - "
+                f"preproc: {self.ts[0] / self.f_cnt:.6f} sec / "
+                f"infer: {self.ts[1] / self.f_cnt:.6f} sec / "
+                f"postproc: {self.ts[2] / self.f_cnt:.6f} sec")
 
         return kept_pred, raw_heatmaps
 
