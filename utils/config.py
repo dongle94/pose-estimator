@@ -50,6 +50,9 @@ def set_config(file):
     # HRNet
     config.hrnet_channel = _config['KEPT']['HRNET']['CHANNEL']
 
+    # ViTPose
+    config.vitpose_name = _config['KEPT']['VITPOSE']['NAME']
+
     # Logger
     config.log_level = _config['LOG']['LOG_LEVEL']
     config.logger_name = _config['LOG']['LOGGER_NAME']
