@@ -23,7 +23,7 @@ You can download each hrnet model configuration file and weight file.
 #### [ViTPose](https://github.com/ViTAE-Transformer/ViTPose/tree/main/configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco?tab=readme-ov-file#results-from-this-repo-on-ms-coco-val-set-single-task-training) (Pytorch)
 With classic decoder
 - ViTPose-s
-  - [OneDrive](https://onedrive.live.com/?authkey=%21AH09V5RkWrcYN78&id=E534267B85818129%2125506&cid=E534267B85818129&parId=root&parQt=sharedby&o=OneUp)
+  - [HuggingFace](https://huggingface.co/JunkyByte/easy_ViTPose/blob/main/torch/coco/vitpose-s-coco.pth)
 - ViTPose-b
   - [OneDrive](https://onedrive.live.com/?authkey=%21ACOnX82tXdVFKYo&id=E534267B85818129%21163&cid=E534267B85818129&parId=root&parQt=sharedby&o=OneUp)
 - ViTPose-l
