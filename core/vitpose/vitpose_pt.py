@@ -137,13 +137,13 @@ if __name__ == "__main__":
     _detector = ObjectDetector(cfg=_cfg)
 
     _estimator = ViTPoseTorch(
-        weight='./weights/vitpose/vitpose-b-coco.pth',
-        device='gpu',
-        gpu_num=0,
-        img_size=[256, 192],
-        fp16=False,
-        dataset_format='coco',
-        model_size='b'
+        weight=_cfg.kept_model_path,
+        device=_cfg.device,
+        gpu_num=_cfg.gpu_num,
+        img_size=_cfg.kept_img_size,
+        fp16=_cfg.kept_half,
+        dataset_format=_cfg.kept_format,
+        model_size=_cfg.vitpose_name
     )
     _estimator.warmup()
 
