@@ -48,8 +48,6 @@ class RMTPoseORT(object):
         self.mean = (123.675, 116.28, 103.53)
         self.std = (58.395, 57.12, 57.375)
 
-
-
     def warmup(self, img_size=None):
         if img_size is None:
             img_size = (1, 3, self.img_size[0], self.img_size[1])
