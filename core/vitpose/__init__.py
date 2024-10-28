@@ -14,7 +14,7 @@ class ViTPoseBase(object):
     def infer(self, inputs):
         pass
 
-    def postprocess(self, preds, orig_wh, pads):
+    def postprocess(self, preds, orig_wh, pads, bboxes):
         pass
 
     def get_time(self):
