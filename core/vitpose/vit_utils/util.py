@@ -11,7 +11,7 @@ MODEL_ABBR_MAP = {
 
 
 def dyn_model_import(dataset: str, model: str):
-    config_name = f'cfg.ViTPose_{dataset}'
+    config_name = f'core.vitpose.cfg.ViTPose_{dataset}'
     imp = import_module(config_name)
     model = f'model_{MODEL_ABBR_MAP[model]}'
     return getattr(imp, model)
