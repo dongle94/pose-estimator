@@ -1,0 +1,173 @@
+import os
+import sys
+import time
+import cv2
+import numpy as np
+import torch
+from torchvision import transforms
+from pathlib import Path
+
+FILE = Path(__file__).resolve()
+ROOT_PATH = FILE.parents[2]
+if ROOT_PATH not in sys.path:
+    sys.path.append(str(ROOT_PATH))
+
+from core.vitpose import ViTPoseBase
+from core.vitpose.models.model import ViTPose
+from core.vitpose.vit_utils.util import dyn_model_import
+from core.vitpose.vit_utils.inference import pad_image
+from utils.torch_utils import select_device
+
+
+class ViTPoseTorch(ViTPoseBase):
+    def __init__(self, weight: str, device: str = 'cpu', gpu_num: int = 0, img_size: list = None,
+                 fp16: bool = False, dataset_format: str = 'coco', model_size: str = None):
+        super(ViTPoseTorch, self).__init__()
+
+        self.device = select_device(device=device, gpu_num=gpu_num)
+        self.img_size = img_size
+
+        if fp16 is True and self.device.type != "cpu":
+            self.fp16 = True
+        else:
+            self.fp16 = False
+            print("ViTPose model will run using fp16 precision")
+
+        self.dataset = dataset_format
+
+        assert model_size in [None, 's', 'b', 'l', 'h'], \
+            f'The model name {model_size} is not valid'
+        model_cfg = dyn_model_import(self.dataset, model_size)
+        model = ViTPose(model_cfg)
+        ckpt = torch.load(weight, map_location=self.device)
+        if 'state_dict' in ckpt:
+            model.load_state_dict(ckpt['state_dict'])
+        else:
+            model.load_state_dict(ckpt)
+        self.model = model.half() if self.fp16 else model.float()
+        self.model = self.model.to(self.device).eval()
+
+        self.pose_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225]),
+        ])
+
+    def warmup(self, img_size=None):
+        if img_size is None:
+            img_size = (1, 3, self.img_size[0], self.img_size[1])
+        im = torch.empty(*img_size, dtype=torch.half if self.fp16 else torch.float, device=self.device)
+        t = self.get_time()
+        self.infer(im)
+        print(f"-- ViTPose Estimator warmup: {time.time() - t:.6f} sec --")
+
+    def preprocess(self, im, boxes):
+        pad_bbox = 10
+
+        model_inputs = []
+        orig_wh = []
+        pads = []
+
+        boxes = boxes[:, :4].round().astype(int)
+        for bbox in boxes:
+            # TODO: Slightly bigger bbox
+            bbox[[0, 2]] = np.clip(bbox[[0, 2]] + [-pad_bbox, pad_bbox], 0, im.shape[1])
+            bbox[[1, 3]] = np.clip(bbox[[1, 3]] + [-pad_bbox, pad_bbox], 0, im.shape[0])
+
+            img_inp = im[bbox[1]:bbox[3], bbox[0]:bbox[2]]
+            img_inp, (left_pad, top_pad) = pad_image(img_inp, 3 / 4)
+
+            org_h, org_w = img_inp.shape[:2]
+            img_input = cv2.resize(img_inp, (self.img_size[1], self.img_size[0]), interpolation=cv2.INTER_LINEAR)
+            img_input = self.pose_transform(img_input)
+            # img_input = img_input.transpose((2, 0, 1)).astype(np.float32)
+            img_input /= 255.0
+
+            model_inputs.append(img_input)
+            orig_wh.append([org_h, org_w])
+            pads.append([left_pad, top_pad])
+
+        model_inputs = torch.stack(model_inputs)
+        inputs = model_inputs.to(self.device)
+        if self.fp16:
+            inputs = inputs.half()
+
+        return inputs, orig_wh, pads
+
+    def infer(self, inputs):
+        outputs = self.model(inputs)
+        return outputs
+
+    def postprocess(self, preds, orig_wh, pads):
+        # batch_heatmaps = preds.cpu().detach().numpy()
+        #
+        # print(batch_heatmaps.shape)
+        # for pred, (orig_w, orig_h), (l_pad, t_pad) in zip(batch_heatmaps, pads, orig_wh):
+        #     print(pred.shape, orig_w, orig_h, l_pad, t_pad)
+        #     print(np.expand_dims(pred, axis=0).shape)
+        #     points, prob = keypoints_from_heatmaps(heatmaps=np.expand_dims(pred, axis=-1),
+        #                                            center=np.array([[orig_w // 2,
+        #                                                              orig_h // 2]]),
+        #                                            scale=np.array([[orig_w, orig_h]]),
+        #                                            unbiased=True, use_udp=True)
+        #     kpts = np.concatenate([points[:, :, ::-1], prob], axis=2)
+        #     keypoints[:, :2] += bbox[:2][::-1] - [top_pad, left_pad]
+        return None
+
+    def get_time(self):
+        if self.device.type == 'cuda':
+            torch.cuda.synchronize()
+        return time.time()
+
+
+if __name__ == "__main__":
+    from core.obj_detector import ObjectDetector
+    from utils.logger import init_logger, get_logger
+    from utils.config import set_config, get_config
+    from utils.visualization import vis_pose_result
+
+    set_config('./configs/config.yaml')
+    _cfg = get_config()
+
+    init_logger(_cfg)
+    _logger = get_logger()
+
+    _detector = ObjectDetector(cfg=_cfg)
+
+    _estimator = ViTPoseTorch(
+        weight='./weights/vitpose/vitpose-b-coco.pth',
+        device='gpu',
+        gpu_num=0,
+        img_size=[256, 192],
+        fp16=False,
+        dataset_format='coco',
+        model_size='b'
+    )
+    _estimator.warmup()
+
+    _img = cv2.imread('./data/images/army.jpg')
+
+    t0 = _detector.detector.get_time()
+    _det = _detector.run(_img)
+    _det = _det.detach().cpu().numpy()
+    t1 = _detector.detector.get_time()
+
+    _input_img = _img.copy()
+    t2 = _estimator.get_time()
+    _kept_inputs, _pads, _orig_wh = _estimator.preprocess(_input_img, _det)
+    t3 = _estimator.get_time()
+    _kept_pred = _estimator.infer(_kept_inputs)
+    t4 = _estimator.get_time()
+    _kept_pred = _estimator.postprocess(_kept_pred, _pads, _orig_wh)
+    t5 = _estimator.get_time()
+
+    for d in _det:
+        x1, y1, x2, y2 = map(int, d[:4])
+        cls = int(d[5])
+        cv2.rectangle(_img, (x1, y1), (x2, y2), (96, 96, 216), thickness=2, lineType=cv2.LINE_AA)
+        cv2.putText(_img, str(_detector.names[cls]), (x1, y1 + 20), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                    (96, 96, 96), thickness=1, lineType=cv2.LINE_AA)
+
+    cv2.imshow('_', _img)
+    cv2.waitKey(0)
+    print(f"Detector: {t1 - t0:.6f} / pre:{t3 - t2:.6f} / infer: {t4 - t3:.6f} / post: {t5 - t4:.6f}")
