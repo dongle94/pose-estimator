@@ -34,14 +34,16 @@ DET:
 
 # Keypoint Detector
 KEPT:
-  MODEL_TYPE: "rtmpose"     # hrnet, rtmpose
-  MODEL_PATH: './weights/rtmpose/rtmpose-l_coco_256x192.onnx'
+  MODEL_TYPE: "vitpose"     # hrnet, rtmpose, vitpsoe
+  MODEL_PATH: './weights/vitpose/vitpose-b-coco.pt'
   HALF: False
   IMG_SIZE: [256, 192]    # [384,288], [256,192], [256,256]
   FORMAT: 'coco'      # coco, mpii, coco-hand
 
   HRNET:
     CHANNEL: 32
+  VITPOSE:
+    NAME: 'b'       # 's', 'b', 'l' ,'h'
 
 
 # Logger
