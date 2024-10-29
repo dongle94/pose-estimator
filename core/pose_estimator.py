@@ -86,10 +86,14 @@ class PoseEstimator(object):
                 from core.vitpose.vitpose_pt import ViTPoseTorch
                 model = ViTPoseTorch
                 self.framework = 'torch'
-            if ext in [".onnx"]:
+            elif ext in [".onnx"]:
                 from core.vitpose.vitpose_ort import ViTPoseORT
                 model = ViTPoseORT
                 self.framework = 'onnx'
+            elif ext in [".engine"]:
+                from core.vitpose.vitpose_trt import ViTPoseTRT
+                model = ViTPoseTRT
+                self.framework = 'trt'
             else:
                 raise FileNotFoundError("No vitpose weight File!")
             self.estimator = model(
