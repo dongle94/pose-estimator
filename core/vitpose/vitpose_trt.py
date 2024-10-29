@@ -4,7 +4,8 @@ import time
 import numpy as np
 from pathlib import Path
 
-import onnxruntime as ort
+from cuda import cudart
+import tensorrt as trt
 
 FILE = Path(__file__).resolve()
 ROOT_PATH = FILE.parents[2]
@@ -16,46 +17,66 @@ from core.vitpose.vit_utils.inference import pad_image
 from core.vitpose.vit_utils.top_down_eval import keypoints_from_heatmaps
 
 
-class ViTPoseORT(ViTPoseBase):
+class ViTPoseTRT(ViTPoseBase):
     def __init__(self, weight: str, device: str = 'cpu', gpu_num: int = 0, img_size: list = None,
-                 fp16: bool = False, dataset_format: str = 'coco', model_size: str = None):
-        super(ViTPoseORT, self).__init__()
+                 fp16: bool = False, dataset_format: str = 'coco', **kwargs):
+        super(ViTPoseTRT, self).__init__()
 
         self.img_size = img_size
         self.device = device
         self.gpu_num = gpu_num
-        self.cuda = ort.get_device() == 'GPU' and device == 'cuda'
         self.fp16 = True if fp16 is True else False
         self.dataset = dataset_format
 
-        providers = ['CPUExecutionProvider']
-        if self.cuda is True:
-            cuda_provider = (
-                "CUDAExecutionProvider", {
-                    "device_id": gpu_num,
-                    'arena_extend_strategy': 'kNextPowerOfTwo',
-                    'cudnn_conv_algo_search': 'HEURISTIC',
-                }
-            )
-            providers.insert(0, cuda_provider)
-        self.sess = ort.InferenceSession(path_or_bytes=weight, providers=providers)
+        self.trt_logger = trt.Logger(trt.Logger.INFO)
+        trt.init_libnvinfer_plugins(self.trt_logger, namespace="")
 
-        self.input_name = self.sess.get_inputs()[0].name
-        self.input_shape = self.sess.get_inputs()[0].shape
-        self.output_names = [o.name for o in self.sess.get_outputs()]
-        self.output_shapes = [output.shape for output in self.sess.get_outputs()]
-        self.output_types = [output.type for output in self.sess.get_outputs()]
+        with open(weight, 'rb') as f, trt.Runtime(self.trt_logger) as runtime:
+            self.engine = runtime.deserialize_cuda_engine(f.read())
+        self.context = self.engine.create_execution_context()
 
-        self.mean = [0.485, 0.456, 0.406]
-        self.std = [0.229, 0.224, 0.225]
+        self.inputs = []
+        self.outputs = []
+        self.allocations = []
+
+        for i in range(self.engine.num_io_tensors):
+            name = self.engine.get_tensor_name(i)
+            dtype = self.engine.get_tensor_dtype(name)
+            shape = list(self.engine.get_tensor_shape(name))
+            is_input = False
+            if self.engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
+                is_input = True
+            size = np.dtype(trt.nptype(dtype)).itemsize
+
+            for s in shape:
+                size *= s
+            allocation = cudart.cudaMalloc(size)[1]
+
+            binding = {
+                'index': i,
+                'name': name,
+                'dtype': np.dtype(trt.nptype(dtype)),
+                'shape': shape,
+                'allocation': allocation,
+                'size': size
+            }
+            self.allocations.append(allocation)
+            if is_input:
+                self.context.set_input_shape(name, shape)
+                self.inputs.append(binding)
+            else:
+                self.outputs.append(binding)
+
+            self.mean = [0.485, 0.456, 0.406]
+            self.std = [0.229, 0.224, 0.225]
 
     def warmup(self, img_size=None):
         if img_size is None:
             img_size = (1, 3, self.img_size[0], self.img_size[1])
-        im = np.zeros(img_size, dtype=np.float16 if self.fp16 else np.float32)
+        im = np.zeros(img_size, dtype=np.float16 if self.fp16 else np.float32)  # input
         t = self.get_time()
-        self.infer(im)
-        print(f"-- ViTPoseORT Estimator warmup: {time.time() - t:.6f} sec --")
+        self.infer(im)  # warmup
+        print(f"-- ViTPose TRT Estimator warmup: {self.get_time() - t:.6f} sec --")
 
     def preprocess(self, im, boxes):
         pad_bbox = 10
@@ -85,17 +106,36 @@ class ViTPoseORT(ViTPoseBase):
             bboxes.append(bbox)
 
         model_inputs = np.stack(model_inputs, axis=0)
+        model_inputs = np.ascontiguousarray(model_inputs)
         model_inputs = model_inputs.astype(np.float16) if self.fp16 else model_inputs.astype(np.float32)
 
         return model_inputs, orig_wh, pads, bboxes
 
     def infer(self, inputs):
-        ret = self.sess.run(self.output_names, {self.input_name: inputs})
-        return ret
+        outputs = []
+        for img in inputs:
+            outs = []
+            for shape, dtype in self.output_spec():
+                outs.append(np.zeros(shape, dtype))
+
+            device_ptr = self.inputs[0]['allocation']
+            host_arr = img
+            nbytes = host_arr.size * host_arr.itemsize
+            cudart.cudaMemcpy(device_ptr, host_arr.data, nbytes, cudart.cudaMemcpyKind.cudaMemcpyHostToDevice)
+
+            self.context.execute_v2(self.allocations)
+            for o in range(len(outs)):
+                host_arr = outs[o][0]
+                device_ptr = self.outputs[o]['allocation']
+                nbytes = host_arr.size * host_arr.itemsize
+                cudart.cudaMemcpy(host_arr, device_ptr, nbytes, cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost)
+                outputs.append(host_arr)
+        outputs = np.array(outputs)
+        return outputs
 
     def postprocess(self, preds, orig_wh, pads, bboxes):
         frame_kpts = []
-        for pred, (orig_w, orig_h), (l_pad, t_pad), bbox in zip(preds[0], pads, orig_wh, bboxes):
+        for pred, (orig_w, orig_h), (l_pad, t_pad), bbox in zip(preds, pads, orig_wh, bboxes):
             points, prob = keypoints_from_heatmaps(heatmaps=np.expand_dims(pred, axis=0).astype(np.float32),
                                                    center=np.array([[orig_w // 2,
                                                                      orig_h // 2]]),
@@ -110,8 +150,18 @@ class ViTPoseORT(ViTPoseBase):
     def get_time(self):
         return time.time()
 
+    def output_spec(self):
+        """
+        Get the specs for the output tensors of the network. Useful to prepare memory allocations.
+        :return: A list with two items per element, the shape and (numpy) datatype of each output tensor.
+        """
+        specs = []
+        for o in self.outputs:
+            specs.append((o['shape'], o['dtype']))
+        return specs
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     from core.obj_detector import ObjectDetector
     from utils.logger import init_logger, get_logger
     from utils.config import set_config, get_config
@@ -124,7 +174,7 @@ if __name__ == "__main__":
     _logger = get_logger()
 
     _detector = ObjectDetector(cfg=_cfg)
-    _estimator = ViTPoseORT(
+    _estimator = ViTPoseTRT(
         weight=_cfg.kept_model_path,
         device=_cfg.device,
         gpu_num=_cfg.gpu_num,
