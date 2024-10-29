@@ -22,7 +22,7 @@ $ pip install -r ./requirements.txt
 - object detectors
   - YOLOv5
     - pytorch, onnx, trt
-  - YOLOv8
+  - YOLOv8, YOLOv10
     - pytorch, onnx, trt
 - pose estimator
   - HRNet
@@ -30,7 +30,7 @@ $ pip install -r ./requirements.txt
   - RTMPose
     - onnx, trt
   - ViTPose
-    - pytorch
+    - pytorch, onnx, trt
 
 ## Reference
 - YOLOv5: https://github.com/ultralytics/yolov5
