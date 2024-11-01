@@ -33,50 +33,24 @@ class ObjectDetector(object):
             max_det = cfg.yolo_max_det
             self.im_shape = None
             self.im0_shape = None
-            if self.detector_type == "yolov5":
-                # model load with weight
-                ext = os.path.splitext(weight)[1]
-                if ext in ['.pt', '.pth']:
-                    from core.yolov5.yolov5_pt import Yolov5Torch
-                    model = Yolov5Torch
-                    self.framework = 'torch'
-                elif ext == '.onnx':
-                    from core.yolov5.yolov5_ort import Yolov5ORT
-                    model = Yolov5ORT
-                    self.framework = 'onnx'
-                elif ext in ['.engine', '.bin']:
-                    from core.yolov5.yolov5_trt import Yolov5TRT
-                    model = Yolov5TRT
-                    self.framework = 'trt'
-                else:
-                    raise FileNotFoundError('No Yolov5 weight File!')
-            elif self.detector_type == "yolov8":
-                # model load with weight
-                ext = os.path.splitext(weight)[1]
-                if ext in ['.pt', '.pth']:
-                    from core.yolo.yolov8_pt import Yolov8Torch
-                    model = Yolov8Torch
-                    self.framework = 'torch'
-                elif ext == '.onnx':
-                    from core.yolo.yolov8_ort import Yolov8ORT
-                    model = Yolov8ORT
-                    self.framework = 'onnx'
-                elif ext in ['.engine', '.bin']:
-                    from core.yolo.yolov8_trt import Yolov8TRT
-                    model = Yolov8TRT
-                    self.framework = 'trt'
-                else:
-                    raise FileNotFoundError('No Yolov8 weight File!')
-            elif self.detector_type == "yolov10":
-                ext = os.path.splitext(weight)[1]
-                if ext in ['.pt', '.pth']:
-                    from core.yolo.yolov10_pt import Yolov10Torch
-                    model = Yolov10Torch
-                    self.framework = 'torch'
-                else:
-                    raise FileNotFoundError('No Yolov10 weight File!')
+
+            # model load with weight
+            ext = os.path.splitext(weight)[1]
+            if ext in ['.pt', '.pth']:
+                from core.yolo.yolo_pt import YoloTorch
+                model = YoloTorch
+                self.framework = 'torch'
+            elif ext == '.onnx':
+                from core.yolo.yolo_ort import YoloORT
+                model = YoloORT
+                self.framework = 'onnx'
+            elif ext in ['.engine', '.bin']:
+                from core.yolo.yolo_trt import YoloTRT
+                model = YoloTRT
+                self.framework = 'trt'
             else:
-                raise NotImplementedError(f'Unknown detector type: {self.detector_type}')
+                raise FileNotFoundError('No YOLO(v5,v8,v10) weight File!')
+
             self.detector = model(
                 weight=weight,
                 device=device,
@@ -87,13 +61,16 @@ class ObjectDetector(object):
                 iou_thres=iou_thres,
                 agnostic=agnostic,
                 max_det=max_det,
-                classes=classes
+                classes=classes,
+                model_type=self.detector_type
             )
             self.names = self.detector.names
 
             # warm up
-            self.detector.warmup(img_size=(1, 3, img_size, img_size))
+            self.detector.warmup()
             self.logger.info(f"Successfully loaded weight from {weight}")
+        else:
+            raise NotImplementedError(f'Unknown detector type: {self.detector_type}')
 
         # logging
         self.f_cnt = 0
@@ -111,7 +88,7 @@ class ObjectDetector(object):
             preds = self.detector.infer(img)
             t2 = self.detector.get_time()
 
-            pred, det = self.detector.postprocess(preds, im_shape, im0_shape)
+            det = self.detector.postprocess(preds, im_shape, im0_shape)
             t3 = self.detector.get_time()
 
             # calculate time & logging

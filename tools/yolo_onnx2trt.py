@@ -24,7 +24,6 @@ def convert(opt):
 
     builder = trt.Builder(logger)
     config = builder.create_builder_config()
-    # config.max_workspace_size = opt.workspace * 1 << 30       # deprecated
     config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, opt.workspace << 30)
 
     flag = (1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
