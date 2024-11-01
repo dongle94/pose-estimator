@@ -11,7 +11,13 @@ from core.yolo.nn.modules import *
 from core.yolo.util import DEFAULT_CFG_DICT, emojis, yaml_load
 from core.yolo.util.checks import check_suffix, check_yaml
 from core.yolo.util.loss import E2EDetectLoss, v8DetectionLoss
-from core.yolo.util.torch_utils import initialize_weights, make_divisible, scale_img
+from core.yolo.util.torch_utils import (
+    fuse_conv_and_bn,
+    fuse_deconv_and_bn,
+    initialize_weights,
+    make_divisible,
+    scale_img
+)
 
 try:
     import thop
@@ -116,48 +122,48 @@ class BaseModel(nn.Module):
     #     if c:
     #         print(f"{sum(dt):10.2f} {'-':>10s} {'-':>10s}  Total")
 
-    # def fuse(self, verbose=True):
-    #     """
-    #     Fuse the `Conv2d()` and `BatchNorm2d()` layers of the model into a single layer, in order to improve the
-    #     computation efficiency.
-    #
-    #     Returns:
-    #         (nn.Module): The fused model is returned.
-    #     """
-    #     if not self.is_fused():
-    #         for m in self.model.modules():
-    #             if isinstance(m, (Conv, Conv2, DWConv)) and hasattr(m, "bn"):
-    #                 if isinstance(m, Conv2):
-    #                     m.fuse_convs()
-    #                 m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
-    #                 delattr(m, "bn")  # remove batchnorm
-    #                 m.forward = m.forward_fuse  # update forward
-    #             if isinstance(m, ConvTranspose) and hasattr(m, "bn"):
-    #                 m.conv_transpose = fuse_deconv_and_bn(m.conv_transpose, m.bn)
-    #                 delattr(m, "bn")  # remove batchnorm
-    #                 m.forward = m.forward_fuse  # update forward
-    #             if isinstance(m, RepConv):
-    #                 m.fuse_convs()
-    #                 m.forward = m.forward_fuse  # update forward
-    #             if isinstance(m, RepVGGDW):
-    #                 m.fuse()
-    #                 m.forward = m.forward_fuse
-    #         self.info(verbose=verbose)
-    #
-    #     return self
+    def fuse(self, verbose=True):
+        """
+        Fuse the `Conv2d()` and `BatchNorm2d()` layers of the model into a single layer, in order to improve the
+        computation efficiency.
 
-    # def is_fused(self, thresh=10):
-    #     """
-    #     Check if the model has less than a certain threshold of BatchNorm layers.
-    #
-    #     Args:
-    #         thresh (int, optional): The threshold number of BatchNorm layers. Default is 10.
-    #
-    #     Returns:
-    #         (bool): True if the number of BatchNorm layers in the model is less than the threshold, False otherwise.
-    #     """
-    #     bn = tuple(v for k, v in nn.__dict__.items() if "Norm" in k)  # normalization layers, i.e. BatchNorm2d()
-    #     return sum(isinstance(v, bn) for v in self.modules()) < thresh  # True if < 'thresh' BatchNorm layers in model
+        Returns:
+            (nn.Module): The fused model is returned.
+        """
+        if not self.is_fused():
+            for m in self.model.modules():
+                if isinstance(m, (Conv, Conv2, DWConv)) and hasattr(m, "bn"):
+                    if isinstance(m, Conv2):
+                        m.fuse_convs()
+                    m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
+                    delattr(m, "bn")  # remove batchnorm
+                    m.forward = m.forward_fuse  # update forward
+                if isinstance(m, ConvTranspose) and hasattr(m, "bn"):
+                    m.conv_transpose = fuse_deconv_and_bn(m.conv_transpose, m.bn)
+                    delattr(m, "bn")  # remove batchnorm
+                    m.forward = m.forward_fuse  # update forward
+                if isinstance(m, RepConv):
+                    m.fuse_convs()
+                    m.forward = m.forward_fuse  # update forward
+                if isinstance(m, RepVGGDW):
+                    m.fuse()
+                    m.forward = m.forward_fuse
+            # self.info(verbose=verbose)
+
+        return self
+
+    def is_fused(self, thresh=10):
+        """
+        Check if the model has less than a certain threshold of BatchNorm layers.
+
+        Args:
+            thresh (int, optional): The threshold number of BatchNorm layers. Default is 10.
+
+        Returns:
+            (bool): True if the number of BatchNorm layers in the model is less than the threshold, False otherwise.
+        """
+        bn = tuple(v for k, v in nn.__dict__.items() if "Norm" in k)  # normalization layers, i.e. BatchNorm2d()
+        return sum(isinstance(v, bn) for v in self.modules()) < thresh  # True if < 'thresh' BatchNorm layers in model
 
     # def info(self, detailed=False, verbose=True, imgsz=640):
     #     """
