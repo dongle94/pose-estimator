@@ -49,15 +49,16 @@ class PoseEstimator(object):
                 model = PoseHRNetTRT
                 self.framework = 'trt'
             else:
-                raise FileNotFoundError("No pose_hrnet weight File!")
+                raise FileNotFoundError("No HRNet Pose weight File!")
             self.estimator = model(
                 weight=weight,
                 device=device,
-                channel=channel,
-                img_size=img_size,
                 gpu_num=gpu_num,
+                img_size=img_size,
                 fp16=fp16,
-                dataset_format=self.kept_format
+                channel=channel,
+                dataset_format=self.kept_format,
+                model_type=self.estimator_type
             )
         elif self.estimator_type == "rtmpose":
             ext = os.path.splitext(weight)[1]
