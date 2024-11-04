@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 import time
@@ -174,10 +175,10 @@ if __name__ == '__main__':
     _estimator = PoseHRNetTorch(
         weight=_cfg.kept_model_path,
         device=_cfg.device,
-        channel=_cfg.hrnet_channel,
-        img_size=_cfg.kept_img_size,
         gpu_num=_cfg.gpu_num,
+        img_size=_cfg.kept_img_size,
         fp16=_cfg.kept_half,
+        channel=_cfg.hrnet_channel,
         dataset_format=_cfg.kept_format,
         model_type=_cfg.kept_model_type
     )
