@@ -1,11 +1,11 @@
 import os
 import sys
 import argparse
+from pathlib import Path
 
 import torch
 import onnx
 
-from pathlib import Path
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]
 if str(ROOT) not in sys.path:
@@ -13,7 +13,16 @@ if str(ROOT) not in sys.path:
 os.chdir(ROOT)
 
 from core.hrnet_pose.hrnet_utils.torch_utils import select_device
-from core.hrnet_pose.hrnet_pose_pt import PoseHRNetTorch
+from core.hrnet_pose.models.pose_hrnet import PoseHighResolutionNet
+
+
+def get_cfg_file(img_size, channel, dataset):
+    if img_size is None:
+        img_size = [256, 192]
+    cfg_file = f"{dataset}_w{channel}_{img_size[0]}x{img_size[1]}.yaml"
+    cfg_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../core/hrnet_pose/cfg', cfg_file))
+
+    return cfg_path
 
 
 def convert(opt):
@@ -23,20 +32,23 @@ def convert(opt):
     device = select_device(device=opt.device, gpu_num=opt.gpu_num)
     fp16 = opt.fp16
     if fp16:
-        assert device.type != 'cpu', '--half only compatible with GPU export, i.e. use --device cuda'
-    hrnet = PoseHRNetTorch(
-        weight=str(file),
-        device=opt.device,
-        channel=opt.channel,
-        img_size=opt.imgsz,
-        gpu_num=opt.gpu_num,
-        fp16=opt.fp16
-    )
-    model = hrnet.model
+        assert device.type != 'cpu', '--fp16 only compatible with GPU export, i.e. use --device cuda'
 
-    im = torch.zeros((1, 3, *opt.imgsz), dtype=torch.half if opt.fp16 else torch.float).to(device)
+    # Model load
+    weight_cfg = get_cfg_file(opt.imgsz, opt.channel, opt.dataset)
+    from core.hrnet_pose.cfg.default import _C as pose_cfg
+    pose_cfg.defrost()
+    pose_cfg.merge_from_file(weight_cfg)
+    pose_cfg.freeze()
+    model = PoseHighResolutionNet(cfg=pose_cfg)
+    model.load_state_dict(torch.load(str(file), map_location=device), strict=False)
 
+    # Input Check
+    im = torch.zeros((1, 3, *opt.imgsz)).to(device)
+
+    model.to(device)
     model.eval()
+
     y = None
     for _ in range(2):
         y = model(im)  # dry runs
@@ -51,7 +63,6 @@ def convert(opt):
 
     f = str(file.with_suffix('.onnx'))
     f = os.path.splitext(f)[0] + f"-{data_format}" + os.path.splitext(f)[1]
-
     torch.onnx.export(
         model=model,
         args=im,
@@ -63,10 +74,13 @@ def convert(opt):
         output_names=['outputs'],
         dynamic_axes=None
     )
-    print(f"Converting and Saving success: {f}")
 
     # Checks
     model_onnx = onnx.load(f)  # load onnx model
+    onnx.checker.check_model(model_onnx)
+
+    print(f"Converting and Saving success: {f}")
+
     # Simplify
     if opt.simplify:
         try:
@@ -88,8 +102,9 @@ def arg_parse():
     parser.add_argument("--imgsz", type=int, nargs="+", default=[256, 192], help="image (h, w)")
     parser.add_argument("--channel", type=int, default=32, help="hrnet width channels")
     parser.add_argument('--simplify', action='store_true', help='ONNX: simplify model')
-    parser.add_argument('--opset', type=int, default=18, help='ONNX: opset version')
+    parser.add_argument('--opset', type=int, default=17, help='ONNX: opset version')
     parser.add_argument('--fp16', action='store_true')
+    parser.add_argument("--dataset", type=str, default="coco", help="coco or mpii, etc..")
     return parser.parse_args()
 
 
