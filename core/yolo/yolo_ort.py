@@ -76,7 +76,7 @@ class YoloORT(YOLO):
         if self.device == 'cuda':
             im_ortval = ort.OrtValue.ortvalue_from_numpy(im, 'cuda', self.gpu_num)
             self.io_binding.bind_input(
-                name='images', device_type=im_ortval.device_name(), device_id=self.gpu_num, element_type=im.dtype,
+                name=self.input_name, device_type=im_ortval.device_name(), device_id=self.gpu_num, element_type=im.dtype,
                 shape=im_ortval.shape(), buffer_ptr=im_ortval.data_ptr()
             )
 

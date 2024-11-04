@@ -1,12 +1,14 @@
+import logging
 import os
 import sys
 import time
 import cv2
-import torch
 import math
 import numpy as np
-from torchvision import transforms
 from pathlib import Path
+
+import torch
+from torchvision import transforms
 
 FILE = Path(__file__).resolve()
 ROOT_PATH = FILE.parents[2]
@@ -14,30 +16,31 @@ if ROOT_PATH not in sys.path:
     sys.path.append(str(ROOT_PATH))
 
 from core.hrnet_pose import PoseHRNet
-from core.hrnet_pose.models.pose_hrnet import PoseHighResolutionNet
 from core.hrnet_pose.hrnet_utils.torch_utils import select_device
+from core.hrnet_pose.models.pose_hrnet import PoseHighResolutionNet
 from core.hrnet_pose.hrnet_utils.transforms import box_to_center_scale, get_affine_transform, transform_preds
 from core.hrnet_pose.hrnet_utils.inference import get_max_preds
+from utils.logger import get_logger
 
 
 class PoseHRNetTorch(PoseHRNet):
-    def __init__(self, weight: str, device: str = 'cpu', channel: int = 32, img_size: list = None, gpu_num: int = 0,
-                 fp16: bool = False, dataset_format: str = 'coco'):
+    def __init__(self, weight: str, device: str = 'cpu', gpu_num: int = 0, img_size: list = None, fp16: bool = False,
+                 channel: int = 32, dataset_format: str = 'coco', **kwargs):
         super(PoseHRNetTorch, self).__init__()
 
+        self.logger = get_logger()
         self.device = select_device(device=device, gpu_num=gpu_num)
-        self.channel = channel
-        self.img_size = img_size
-
         if fp16 is True and self.device.type != "cpu":
             self.fp16 = True
         else:
             self.fp16 = False
-            print("HRNet_pose pytorch model not support cpu version's fp16. It apply fp32.")
+            self.logger.info(f"{kwargs['model_type']} pytorch model will not use fp16. It will apply fp32.")
 
+        self.channel = channel
+        self.img_size = img_size
         self.dataset = dataset_format
         self.weight_cfg = self.get_cfg_file()
-        print(f"Weight config path: {self.weight_cfg}")
+        self.logger.info(f"Weight config path: {self.weight_cfg}")
 
         # get model
         from core.hrnet_pose.cfg.default import _C as pose_cfg
@@ -54,14 +57,16 @@ class PoseHRNetTorch(PoseHRNet):
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225]),
         ])
+        self.kwargs = kwargs
 
     def warmup(self, img_size=None):
         if img_size is None:
             img_size = (1, 3, self.img_size[0], self.img_size[1])
         im = torch.empty(*img_size, dtype=torch.half if self.fp16 else torch.float, device=self.device)
+
         t = self.get_time()
         self.infer(im)
-        print(f"-- HRNetPose Estimator warmup: {time.time()-t:.6f} sec --")
+        self.logger.info(f"-- {self.kwargs['model_type']} Pytorch Estimator warmup: {time.time()-t:.6f} sec --")
 
     def preprocess(self, im, boxes):
         """
@@ -157,7 +162,7 @@ class PoseHRNetTorch(PoseHRNet):
 
 if __name__ == '__main__':
     from core.obj_detector import ObjectDetector
-    from utils.logger import init_logger, get_logger
+    from utils.logger import init_logger
     from utils.config import set_config, get_config
     from utils.visualization import vis_pose_result
 
@@ -165,17 +170,17 @@ if __name__ == '__main__':
     _cfg = get_config()
 
     init_logger(_cfg)
-    _logger = get_logger()
 
     _detector = ObjectDetector(cfg=_cfg)
     _estimator = PoseHRNetTorch(
         weight=_cfg.kept_model_path,
         device=_cfg.device,
-        channel=_cfg.hrnet_channel,
-        img_size=_cfg.kept_img_size,
         gpu_num=_cfg.gpu_num,
+        img_size=_cfg.kept_img_size,
         fp16=_cfg.kept_half,
-        dataset_format=_cfg.kept_format
+        channel=_cfg.hrnet_channel,
+        dataset_format=_cfg.kept_format,
+        model_type=_cfg.kept_model_type
     )
     _estimator.warmup()
 
@@ -183,12 +188,10 @@ if __name__ == '__main__':
 
     t0 = _detector.detector.get_time()
     _det = _detector.run(_img)
-    _det = _det.detach().cpu().numpy()
     t1 = _detector.detector.get_time()
 
-    _input_img = _img.copy()
     t2 = _estimator.get_time()
-    _kept_inputs, _centers, _scales = _estimator.preprocess(_input_img, _det)
+    _kept_inputs, _centers, _scales = _estimator.preprocess(_img, _det)
     t3 = _estimator.get_time()
     _kept_pred = _estimator.infer(_kept_inputs)
     t4 = _estimator.get_time()
@@ -207,4 +210,4 @@ if __name__ == '__main__':
 
     cv2.imshow('_', _img)
     cv2.waitKey(0)
-    print(f"Detector: {t1 - t0:.6f} / pre:{t3 - t2:.6f} / infer: {t4 - t3:.6f} / post: {t5 - t4:.6f}")
+    get_logger().info(f"Detector: {t1 - t0:.6f} / pre:{t3 - t2:.6f} / infer: {t4 - t3:.6f} / post: {t5 - t4:.6f}")

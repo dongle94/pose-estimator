@@ -57,6 +57,7 @@ class YoloTorch(YOLO):
         if img_size is None:
             img_size = (1, 3, self.img_size[0], self.img_size[1])
         im = torch.empty(*img_size, dtype=torch.half if self.fp16 else torch.float, device=self.device)
+
         t = self.get_time()
         self.infer(im)
         self.logger.info(f"-- {self.kwargs['model_type']} Pytorch Detector warmup: {time.time()-t:.6f} sec --")

@@ -1,6 +1,4 @@
-import os
 import sys
-import time
 import cv2
 import math
 import numpy as np
@@ -16,19 +14,22 @@ if ROOT_PATH not in sys.path:
 from core.hrnet_pose import PoseHRNet
 from core.hrnet_pose.hrnet_utils.transforms import box_to_center_scale, get_affine_transform, transform_preds
 from core.hrnet_pose.hrnet_utils.inference import get_max_preds
+from utils.logger import get_logger
 
 
 class PoseHRNetORT(PoseHRNet):
-    def __init__(self, weight: str, device: str = 'cpu', channel: int = 32, img_size: list = None, gpu_num: int = 0,
-                 fp16: bool = False, dataset_format: str = 'coco'):
+    def __init__(self, weight: str, device: str = 'cpu', gpu_num: int = 0, img_size: list = None, fp16: bool = False,
+                 channel: int = 32,  dataset_format: str = 'coco', **kwargs):
         super(PoseHRNetORT, self).__init__()
 
+        self.logger = get_logger()
         self.device = device
         self.gpu_num = gpu_num
-        self.channel = channel
-        self.img_size = img_size
         self.cuda = ort.get_device() == 'GPU' and device == 'cuda'
         self.fp16 = True if fp16 is True else False
+
+        self.channel = channel
+        self.img_size = img_size
         self.dataset = dataset_format
 
         providers = ['CPUExecutionProvider']
@@ -47,27 +48,22 @@ class PoseHRNetORT(PoseHRNet):
             self.io_binding.bind_output('outputs')
 
         self.input_name = self.sess.get_inputs()[0].name
-        self.input_shape = self.sess.get_inputs()[0].shape
         self.output_names = [o.name for o in self.sess.get_outputs()]
         self.output_shapes = [output.shape for output in self.sess.get_outputs()]
         self.output_types = [output.type for output in self.sess.get_outputs()]
 
         self.mean = [0.485, 0.456, 0.406],
         self.std = [0.229, 0.224, 0.225]
+        self.kwargs = kwargs
 
     def warmup(self, img_size=None):
         if img_size is None:
             img_size = (1, 3, self.img_size[0], self.img_size[1])
         im = np.zeros(img_size, dtype=np.float16 if self.fp16 else np.float32)
-        if self.device == 'cuda':
-            im_ortval = ort.OrtValue.ortvalue_from_numpy(im, 'cuda', self.gpu_num)
-            element_type = np.float16 if self.fp16 else np.float32
-            self.io_binding.bind_input(
-                name=self.input_name, device_type=im_ortval.device_name(), device_id=self.gpu_num, element_type=element_type,
-                shape=im_ortval.shape(), buffer_ptr=im_ortval.data_ptr())
+
         t = self.get_time()
-        self.infer(im)
-        print(f"-- HRNetPose Onnx Estimator warmup: {time.time()-t:.6f} sec --")
+        self.infer([im])
+        self.logger.info(f"-- {self.kwargs['model_type']} Onnx Estimator warmup: {self.get_time()-t:.6f} sec --")
 
     def preprocess(self, im, boxes):
         """
@@ -97,10 +93,11 @@ class PoseHRNetORT(PoseHRNet):
             )
 
             # normalize image
+            input_img = (input_img - self.mean) / self.std
+            input_img = input_img.transpose((2, 0, 1))[::-1]
             input_img = np.ascontiguousarray(input_img).astype(np.float32)
             input_img /= 255.0
-            input_img = (input_img - self.mean) / self.std
-            input_img = input_img[..., ::-1].transpose((2, 0, 1))
+            input_img = np.expand_dims(input_img, 0)
             model_inputs.append(input_img)
 
         inputs = np.array(model_inputs, dtype=np.float16 if self.fp16 else np.float32)
@@ -111,12 +108,10 @@ class PoseHRNetORT(PoseHRNet):
         rets = []
         for img in inputs:
             if self.device == 'cuda':
-                img = np.expand_dims(img, 0)
                 im_ortval = ort.OrtValue.ortvalue_from_numpy(img, self.device, self.gpu_num)
-                element_type = np.float16 if self.fp16 else np.float32
                 self.io_binding.bind_input(
                     name=self.input_name, device_type=im_ortval.device_name(), device_id=self.gpu_num,
-                    element_type=element_type, shape=im_ortval.shape(), buffer_ptr=im_ortval.data_ptr())
+                    element_type=img.dtype, shape=im_ortval.shape(), buffer_ptr=im_ortval.data_ptr())
 
                 self.sess.run_with_iobinding(self.io_binding)
 
@@ -131,6 +126,7 @@ class PoseHRNetORT(PoseHRNet):
         # raw_heatmaps -> coordinates
         batch_heatmaps = preds
         coords, maxvals = get_max_preds(batch_heatmaps)
+
         heatmap_height = batch_heatmaps.shape[2]
         heatmap_width = batch_heatmaps.shape[3]
 
@@ -162,7 +158,7 @@ class PoseHRNetORT(PoseHRNet):
 
 if __name__ == '__main__':
     from core.obj_detector import ObjectDetector
-    from utils.logger import init_logger, get_logger
+    from utils.logger import init_logger
     from utils.config import set_config, get_config
     from utils.visualization import vis_pose_result
 
@@ -170,17 +166,17 @@ if __name__ == '__main__':
     _cfg = get_config()
 
     init_logger(_cfg)
-    _logger = get_logger()
 
     _detector = ObjectDetector(cfg=_cfg)
     _estimator = PoseHRNetORT(
         weight=_cfg.kept_model_path,
         device=_cfg.device,
-        channel=_cfg.hrnet_channel,
-        img_size=_cfg.kept_img_size,
         gpu_num=_cfg.gpu_num,
+        img_size=_cfg.kept_img_size,
         fp16=_cfg.kept_half,
-        dataset_format=_cfg.kept_format
+        channel=_cfg.hrnet_channel,
+        dataset_format=_cfg.kept_format,
+        model_type=_cfg.kept_model_type
     )
     _estimator.warmup()
 
@@ -190,9 +186,8 @@ if __name__ == '__main__':
     _det = _detector.run(_img)
     t1 = _detector.detector.get_time()
 
-    _input_img = _img.copy()
     t2 = _estimator.get_time()
-    _kept_inputs, _centers, _scales = _estimator.preprocess(_input_img, _det)
+    _kept_inputs, _centers, _scales = _estimator.preprocess(_img, _det)
     t3 = _estimator.get_time()
     _kept_pred = _estimator.infer(_kept_inputs)
     t4 = _estimator.get_time()
@@ -211,4 +206,4 @@ if __name__ == '__main__':
 
     cv2.imshow('_', _img)
     cv2.waitKey(0)
-    print(f"Detector: {t1 - t0:.6f} / pre:{t3 - t2:.6f} / infer: {t4 - t3:.6f} / post: {t5 - t4:.6f}")
+    get_logger().info(f"Detector: {t1 - t0:.6f} / pre:{t3 - t2:.6f} / infer: {t4 - t3:.6f} / post: {t5 - t4:.6f}")
