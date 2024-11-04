@@ -1,5 +1,4 @@
 import sys
-import time
 import cv2
 import math
 import numpy as np
@@ -64,7 +63,7 @@ class PoseHRNetORT(PoseHRNet):
 
         t = self.get_time()
         self.infer([im])
-        self.logger.info(f"-- {self.kwargs['model_type']} Onnx Estimator warmup: {time.time()-t:.6f} sec --")
+        self.logger.info(f"-- {self.kwargs['model_type']} Onnx Estimator warmup: {self.get_time()-t:.6f} sec --")
 
     def preprocess(self, im, boxes):
         """
@@ -172,10 +171,10 @@ if __name__ == '__main__':
     _estimator = PoseHRNetORT(
         weight=_cfg.kept_model_path,
         device=_cfg.device,
-        channel=_cfg.hrnet_channel,
-        img_size=_cfg.kept_img_size,
         gpu_num=_cfg.gpu_num,
+        img_size=_cfg.kept_img_size,
         fp16=_cfg.kept_half,
+        channel=_cfg.hrnet_channel,
         dataset_format=_cfg.kept_format,
         model_type=_cfg.kept_model_type
     )
