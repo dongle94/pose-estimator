@@ -1,5 +1,11 @@
+# python
+__pycache__
+
 # intelliJ
 .idea
+
+# vscode
+.vscode
 
 # log
 log
