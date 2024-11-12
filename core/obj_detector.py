@@ -26,7 +26,7 @@ class ObjectDetector(object):
 
         self.framework = None
 
-        if self.detector_type in ["yolov5", "yolov8", "yolov10"]:
+        if self.detector_type in ["yolov5", "yolov8", "yolov10", "yolov11"]:
             img_size = cfg.yolo_img_size
             iou_thres = cfg.yolo_nms_iou
             agnostic = cfg.yolo_agnostic_nms
@@ -49,7 +49,7 @@ class ObjectDetector(object):
                 model = YoloTRT
                 self.framework = 'trt'
             else:
-                raise FileNotFoundError('No YOLO(v5,v8,v10) weight File!')
+                raise FileNotFoundError('No YOLO(v5,v8,v10,v11) weight File!')
 
             self.detector = model(
                 weight=weight,
@@ -77,7 +77,7 @@ class ObjectDetector(object):
         self.ts = [0., 0., 0.]
 
     def run(self, img):
-        if self.detector_type in ["yolov5", "yolov8", "yolov10"]:
+        if self.detector_type in ["yolov5", "yolov8", "yolov10", "yolov11"]:
             t0 = self.detector.get_time()
 
             img, orig_img = self.detector.preprocess(img)
