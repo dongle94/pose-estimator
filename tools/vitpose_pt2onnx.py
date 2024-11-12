@@ -83,7 +83,7 @@ def arg_parse():
     parser.add_argument('-d', '--device', default='cpu', help='cpu or cuda')
     parser.add_argument('--gpu_num', default=0, type=int, help='0, 1, 2,...')
     parser.add_argument('--simplify', action='store_true', help='ONNX: simplify model')
-    parser.add_argument('--opset', type=int, default=18, help='ONNX: opset version')
+    parser.add_argument('--opset', type=int, default=17, help='ONNX: opset version')
     parser.add_argument('--fp16', action='store_true')
     return parser.parse_args()
 
