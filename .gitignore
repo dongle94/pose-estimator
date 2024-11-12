@@ -7,8 +7,11 @@ __pycache__
 # vscode
 .vscode
 
-# log
+# logs files
 log
 
-# weight
+# AI(DL) model weight
 weights
+
+# wrote video file
+run
