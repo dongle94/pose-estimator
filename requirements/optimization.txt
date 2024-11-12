@@ -1,14 +1,14 @@
 # onnx converting
-onnx>=1.15.0; python_version > '3.7'
+onnx>=1.14.0; python_version > '3.7'
 onnx-simplifier>=0.4.1
 onnxruntime-gpu>=1.14.1
-onnxconverter-common
+#onnxconverter-common
 
 # TensorRT
-cuda-python==11.8.2
-tensorrt-cu11==10.0.1
-tensorrt-cu11-bindings==10.0.1
-tensorrt-cu11-libs==10.0.1
+cuda-python==12.4.0
+tensorrt-cu12==10.0.1
+tensorrt-cu12-bindings==10.0.1
+tensorrt-cu12-libs==10.0.1
 
 # Windows-TensorRT
 pypiwin32; platform_system == "Windows"

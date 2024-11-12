@@ -1,7 +1,7 @@
 pyyaml
 opencv-python
-numpy==1.23.5
+numpy==1.26.4
 
 yacs==0.1.8
 tqdm
-shapely==2.0.1
+shapely
