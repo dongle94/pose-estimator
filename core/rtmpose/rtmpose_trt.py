@@ -12,19 +12,23 @@ ROOT_PATH = FILE.parents[2]
 if ROOT_PATH not in sys.path:
     sys.path.append(str(ROOT_PATH))
 
+from core.rtmpose import RMTPose
 from core.rtmpose.rtmpose_utils.preprocess import bbox_xyxy2cs, top_down_affine
 from core.rtmpose.rtmpose_utils.postprocess import decode
+from utils.logger import get_logger
 
 
-class RMTPoseTRT(object):
-    def __init__(self, weight: str, device: str = 'cpu', img_size: list = None, gpu_num: int = 0, fp16: bool = False,
-                 dataset_format: str = 'coco'):
+class RMTPoseTRT(RMTPose):
+    def __init__(self, weight: str, device: str = 'cpu',gpu_num: int = 0, img_size: list = None, fp16: bool = False,
+                 dataset_format: str = 'coco', **kwargs):
         super(RMTPoseTRT, self).__init__()
 
-        self.img_size = img_size
+        self.logger = get_logger()
         self.device = device
         self.gpu_num = gpu_num
         self.fp16 = True if fp16 is True else False
+
+        self.img_size = img_size
         self.dataset = dataset_format
 
         self.trt_logger = trt.Logger(trt.Logger.INFO)
@@ -42,16 +46,16 @@ class RMTPoseTRT(object):
             name = self.engine.get_tensor_name(i)
             dtype = self.engine.get_tensor_dtype(name)
             shape = list(self.engine.get_tensor_shape(name))
-            is_input = False
-            if self.engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
-                is_input = True
+            is_input = True if self.engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT else False
             size = np.dtype(trt.nptype(dtype)).itemsize
+
             for idx, s in enumerate(shape):
                 if s == -1:
                     s = 1
                     shape[idx] = 1
                 size *= s
             allocation = cudart.cudaMalloc(size)[1]
+
             binding = {
                 'index': i,
                 'name': name,
@@ -69,14 +73,16 @@ class RMTPoseTRT(object):
 
         self.mean = (123.675, 116.28, 103.53)
         self.std = (58.395, 57.12, 57.375)
+        self.kwargs = kwargs
 
     def warmup(self, img_size=None):
         if img_size is None:
             img_size = (1, 3, self.img_size[0], self.img_size[1])
         im = np.zeros(img_size, dtype=np.float16 if self.fp16 else np.float32)  # input
+
         t = self.get_time()
         self.infer(im)  # warmup
-        print(f"-- RTMPose TRT Estimator warmup: {self.get_time() - t:.6f} sec --")
+        self.logger.info(f"-- {self.kwargs['model_type']} TRT Estimator warmup: {self.get_time() - t:.6f} sec --")
 
     def preprocess(self, im, boxes):
         centers = []
@@ -90,9 +96,10 @@ class RMTPoseTRT(object):
             resized_img, scale = top_down_affine(input_size, scale, center, im)
             centers.append(center)
             scales.append(scale)
+
             # normalize image
             resized_img = (resized_img - self.mean) / self.std
-            resized_img = resized_img[..., ::-1].transpose((2, 0, 1))
+            resized_img = resized_img.transpose((2, 0, 1))[::-1]
             resized_img = np.ascontiguousarray(resized_img)
             resized_img = resized_img.astype(np.float16) if self.fp16 else resized_img.astype(np.float32)
             inputs.append(resized_img)
@@ -149,9 +156,6 @@ class RMTPoseTRT(object):
 
         return preds, heatmaps
 
-    def get_time(self):
-        return time.time()
-
     def output_spec(self):
         """
         Get the specs for the output tensors of the network. Useful to prepare memory allocations.
@@ -165,7 +169,7 @@ class RMTPoseTRT(object):
 
 if __name__ == '__main__':
     from core.obj_detector import ObjectDetector
-    from utils.logger import init_logger, get_logger
+    from utils.logger import init_logger
     from utils.config import set_config, get_config
     from utils.visualization import vis_pose_result
 
@@ -173,29 +177,27 @@ if __name__ == '__main__':
     _cfg = get_config()
 
     init_logger(_cfg)
-    _logger = get_logger()
 
     _detector = ObjectDetector(cfg=_cfg)
     _estimator = RMTPoseTRT(
         weight=_cfg.kept_model_path,
         device=_cfg.device,
-        img_size=_cfg.kept_img_size,
         gpu_num=_cfg.gpu_num,
+        img_size=_cfg.kept_img_size,
         fp16=_cfg.kept_half,
-        dataset_format=_cfg.kept_format
+        dataset_format=_cfg.kept_format,
+        model_type=_cfg.kept_model_type
     )
     _estimator.warmup()
 
-    _img = cv2.imread('./data/images/army.jpg')
+    _img = cv2.imread('./data/images/sample.jpg')
 
     t0 = _detector.detector.get_time()
     _det = _detector.run(_img)
-    _det_res = _det[:, :4]
     t1 = _detector.detector.get_time()
 
-    _input_img = _img.copy()
     t2 = _estimator.get_time()
-    _kept_inputs, _centers, _scales = _estimator.preprocess(_input_img, _det_res)
+    _kept_inputs, _centers, _scales = _estimator.preprocess(_img, _det)
     t3 = _estimator.get_time()
     _kept_pred = _estimator.infer(_kept_inputs)
     t4 = _estimator.get_time()
@@ -214,4 +216,4 @@ if __name__ == '__main__':
 
     cv2.imshow('_', _img)
     cv2.waitKey(0)
-    print(f"Detector: {t1 - t0:.6f} / pre:{t3 - t2:.6f} / infer: {t4 - t3:.6f} / post: {t5 - t4:.6f}")
+    get_logger().info(f"Detector: {t1 - t0:.6f} / pre:{t3 - t2:.6f} / infer: {t4 - t3:.6f} / post: {t5 - t4:.6f}")
