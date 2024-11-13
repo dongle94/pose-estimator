@@ -116,6 +116,7 @@ class RMTPoseORT(RMTPose):
             _keypoints.append(keypoint)
         kepts = np.array(_keypoints)
         preds = np.concatenate((kepts, np.expand_dims(scores, axis=-1)), axis=2)
+
         return preds, heatmaps
 
 
