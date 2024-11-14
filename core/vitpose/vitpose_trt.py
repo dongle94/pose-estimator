@@ -15,17 +15,20 @@ if ROOT_PATH not in sys.path:
 from core.vitpose import ViTPoseBase
 from core.vitpose.vit_utils.inference import pad_image
 from core.vitpose.vit_utils.top_down_eval import keypoints_from_heatmaps
+from utils.logger import get_logger
 
 
 class ViTPoseTRT(ViTPoseBase):
-    def __init__(self, weight: str, device: str = 'cpu', gpu_num: int = 0, img_size: list = None,
-                 fp16: bool = False, dataset_format: str = 'coco', **kwargs):
+    def __init__(self, weight: str, device: str = 'cpu', gpu_num: int = 0, img_size: list = None, fp16: bool = False,
+                 dataset_format: str = 'coco', **kwargs):
         super(ViTPoseTRT, self).__init__()
 
-        self.img_size = img_size
+        self.logger = get_logger()
         self.device = device
         self.gpu_num = gpu_num
         self.fp16 = True if fp16 is True else False
+
+        self.img_size = img_size
         self.dataset = dataset_format
 
         self.trt_logger = trt.Logger(trt.Logger.INFO)
@@ -67,16 +70,18 @@ class ViTPoseTRT(ViTPoseBase):
             else:
                 self.outputs.append(binding)
 
-            self.mean = [0.485, 0.456, 0.406]
-            self.std = [0.229, 0.224, 0.225]
+        self.mean = [0.485, 0.456, 0.406]
+        self.std = [0.229, 0.224, 0.225]
+        self.kwargs = kwargs
 
     def warmup(self, img_size=None):
         if img_size is None:
             img_size = (1, 3, self.img_size[0], self.img_size[1])
         im = np.zeros(img_size, dtype=np.float16 if self.fp16 else np.float32)  # input
+
         t = self.get_time()
         self.infer(im)  # warmup
-        print(f"-- ViTPose TRT Estimator warmup: {self.get_time() - t:.6f} sec --")
+        self.logger.info(f"-- {self.kwargs['model_type']} TRT Estimator warmup: {self.get_time() - t:.6f} sec --")
 
     def preprocess(self, im, boxes):
         pad_bbox = 10
@@ -96,10 +101,11 @@ class ViTPoseTRT(ViTPoseBase):
             img_inp, (left_pad, top_pad) = pad_image(img_inp, 3 / 4)
 
             org_h, org_w = img_inp.shape[:2]
-            img_input = cv2.resize(img_inp, (self.img_size[1], self.img_size[0]), interpolation=cv2.INTER_LINEAR) / 255
-            img_input = img_input[..., ::-1]
-            img_input = ((img_input - self.mean) / self.std).transpose(2, 0, 1)
-
+            img_input = cv2.resize(img_inp, (self.img_size[1], self.img_size[0]), interpolation=cv2.INTER_LINEAR)
+            img_input = img_input.astype(np.float32)
+            img_input /= 255.0
+            img_input = ((img_input - self.mean) / self.std)
+            img_input = img_input.transpose(2, 0, 1)[::-1]
             model_inputs.append(img_input)
             orig_wh.append([org_w, org_h])
             pads.append([left_pad, top_pad])
@@ -131,6 +137,7 @@ class ViTPoseTRT(ViTPoseBase):
                 cudart.cudaMemcpy(host_arr, device_ptr, nbytes, cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost)
                 outputs.append(host_arr)
         outputs = np.array(outputs)
+
         return outputs
 
     def postprocess(self, preds, orig_wh, pads, bboxes):
@@ -145,10 +152,8 @@ class ViTPoseTRT(ViTPoseBase):
             kpts = np.concatenate([points, prob], axis=2)[0]
             kpts[:, :2] += bbox[:2] - [l_pad, t_pad]
             frame_kpts.append(kpts)
-        return frame_kpts
 
-    def get_time(self):
-        return time.time()
+        return frame_kpts
 
     def output_spec(self):
         """
@@ -163,7 +168,7 @@ class ViTPoseTRT(ViTPoseBase):
 
 if __name__ == '__main__':
     from core.obj_detector import ObjectDetector
-    from utils.logger import init_logger, get_logger
+    from utils.logger import init_logger
     from utils.config import set_config, get_config
     from utils.visualization import vis_pose_result
 
@@ -171,7 +176,6 @@ if __name__ == '__main__':
     _cfg = get_config()
 
     init_logger(_cfg)
-    _logger = get_logger()
 
     _detector = ObjectDetector(cfg=_cfg)
     _estimator = ViTPoseTRT(
@@ -181,7 +185,8 @@ if __name__ == '__main__':
         img_size=_cfg.kept_img_size,
         fp16=_cfg.kept_half,
         dataset_format=_cfg.kept_format,
-        model_size=_cfg.vitpose_name
+        model_size=_cfg.vitpose_name,
+        model_type=_cfg.kept_model_type
     )
     _estimator.warmup()
 
@@ -189,12 +194,10 @@ if __name__ == '__main__':
 
     t0 = _detector.detector.get_time()
     _det = _detector.run(_img)
-    _det = _det.detach().cpu().numpy()
     t1 = _detector.detector.get_time()
 
-    _input_img = _img.copy()
     t2 = _estimator.get_time()
-    _kept_inputs, _pads, _orig_wh, _bboxes = _estimator.preprocess(_input_img, _det)
+    _kept_inputs, _pads, _orig_wh, _bboxes = _estimator.preprocess(_img, _det)
     t3 = _estimator.get_time()
     _kept_pred = _estimator.infer(_kept_inputs)
     t4 = _estimator.get_time()
@@ -213,4 +216,4 @@ if __name__ == '__main__':
 
     cv2.imshow('_', _img)
     cv2.waitKey(0)
-    print(f"Detector: {t1 - t0:.6f} / pre:{t3 - t2:.6f} / infer: {t4 - t3:.6f} / post: {t5 - t4:.6f}")
+    get_logger().info(f"Detector: {t1 - t0:.6f} / pre:{t3 - t2:.6f} / infer: {t4 - t3:.6f} / post: {t5 - t4:.6f}")
