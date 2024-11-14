@@ -84,7 +84,9 @@ class ViTPoseTorch(ViTPoseBase):
             img_inp, (left_pad, top_pad) = pad_image(img_inp, 3 / 4)
 
             org_h, org_w = img_inp.shape[:2]
-            img_input = cv2.resize(img_inp, (self.img_size[1], self.img_size[0]), interpolation=cv2.INTER_LINEAR) / 255
+            img_input = cv2.resize(img_inp, (self.img_size[1], self.img_size[0]), interpolation=cv2.INTER_LINEAR)
+            img_input = np.ascontiguousarray(img_input).astype(np.float32)
+            img_input /= 255.0
             img_input = img_input[..., ::-1]
             img_input = self.pose_transform(img_input.copy())
 
@@ -105,7 +107,7 @@ class ViTPoseTorch(ViTPoseBase):
         return outputs
 
     def postprocess(self, preds, orig_wh, pads, bboxes):
-        batch_heatmaps = preds.cpu().detach().numpy()
+        batch_heatmaps = preds.float().cpu().detach().numpy()
 
         frame_kpts = []
         for pred, (orig_w, orig_h), (l_pad, t_pad), bbox in zip(batch_heatmaps, pads, orig_wh, bboxes):
