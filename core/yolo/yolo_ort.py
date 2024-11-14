@@ -81,7 +81,8 @@ class YoloORT(YOLO):
             )
 
         t = self.get_time()
-        self.infer(im)
+        for _ in range(2):
+            self.infer(im)  # warmup
         self.logger.info(f"-- {self.kwargs['model_type']} Onnx Detector warmup: {self.get_time() - t:.6f} sec --")
 
     def preprocess(self, img):
