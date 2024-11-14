@@ -1,11 +1,11 @@
-import os
 import sys
 import time
 import cv2
 import numpy as np
+from pathlib import Path
+
 import torch
 from torchvision import transforms
-from pathlib import Path
 
 FILE = Path(__file__).resolve()
 ROOT_PATH = FILE.parents[2]
@@ -18,23 +18,25 @@ from core.vitpose.vit_utils.util import dyn_model_import
 from core.vitpose.vit_utils.top_down_eval import keypoints_from_heatmaps
 from core.vitpose.vit_utils.inference import pad_image
 from utils.torch_utils import select_device
+from utils.logger import get_logger
 
 
 class ViTPoseTorch(ViTPoseBase):
     def __init__(self, weight: str, device: str = 'cpu', gpu_num: int = 0, img_size: list = None,
-                 fp16: bool = False, dataset_format: str = 'coco', model_size: str = None):
+                 fp16: bool = False, dataset_format: str = 'coco', model_size: str = None, **kwargs):
         super(ViTPoseTorch, self).__init__()
 
+        self.logger = get_logger()
         self.device = select_device(device=device, gpu_num=gpu_num)
-        self.img_size = img_size
-
         if fp16 is True and self.device.type != "cpu":
             self.fp16 = True
         else:
             self.fp16 = False
-            print("ViTPose model will run using fp16 precision")
+            self.logger.info("ViTPose model will run using fp16 precision")
 
+        self.img_size = img_size
         self.dataset = dataset_format
+        self.model_size = model_size
 
         assert model_size in [None, 's', 'b', 'l', 'h'], \
             f'The model name {model_size} is not valid'
@@ -53,14 +55,16 @@ class ViTPoseTorch(ViTPoseBase):
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225]),
         ])
+        self.kwargs = kwargs
 
     def warmup(self, img_size=None):
         if img_size is None:
             img_size = (1, 3, self.img_size[0], self.img_size[1])
         im = torch.empty(*img_size, dtype=torch.half if self.fp16 else torch.float, device=self.device)
+
         t = self.get_time()
         self.infer(im)
-        print(f"-- ViTPose Estimator warmup: {time.time() - t:.6f} sec --")
+        self.logger.info(f"-- {self.kwargs['model_type']} Pytorch Estimator warmup: {time.time() - t:.6f} sec --")
 
     def preprocess(self, im, boxes):
         pad_bbox = 10
@@ -72,7 +76,7 @@ class ViTPoseTorch(ViTPoseBase):
 
         boxes = boxes[:, :4].round().astype(int)
         for bbox in boxes:
-            # TODO: Slightly bigger bbox
+            # Slightly bigger bbox
             bbox[[0, 2]] = np.clip(bbox[[0, 2]] + [-pad_bbox, pad_bbox], 0, im.shape[1])
             bbox[[1, 3]] = np.clip(bbox[[1, 3]] + [-pad_bbox, pad_bbox], 0, im.shape[0])
 
@@ -80,7 +84,9 @@ class ViTPoseTorch(ViTPoseBase):
             img_inp, (left_pad, top_pad) = pad_image(img_inp, 3 / 4)
 
             org_h, org_w = img_inp.shape[:2]
-            img_input = cv2.resize(img_inp, (self.img_size[1], self.img_size[0]), interpolation=cv2.INTER_LINEAR) / 255
+            img_input = cv2.resize(img_inp, (self.img_size[1], self.img_size[0]), interpolation=cv2.INTER_LINEAR)
+            img_input = np.ascontiguousarray(img_input).astype(np.float32)
+            img_input /= 255.0
             img_input = img_input[..., ::-1]
             img_input = self.pose_transform(img_input.copy())
 
@@ -101,7 +107,7 @@ class ViTPoseTorch(ViTPoseBase):
         return outputs
 
     def postprocess(self, preds, orig_wh, pads, bboxes):
-        batch_heatmaps = preds.cpu().detach().numpy()
+        batch_heatmaps = preds.float().cpu().detach().numpy()
 
         frame_kpts = []
         for pred, (orig_w, orig_h), (l_pad, t_pad), bbox in zip(batch_heatmaps, pads, orig_wh, bboxes):
@@ -114,6 +120,7 @@ class ViTPoseTorch(ViTPoseBase):
             kpts = np.concatenate([points, prob], axis=2)[0]
             kpts[:, :2] += bbox[:2] - [l_pad, t_pad]
             frame_kpts.append(kpts)
+
         return frame_kpts
 
     def get_time(self):
@@ -124,7 +131,7 @@ class ViTPoseTorch(ViTPoseBase):
 
 if __name__ == "__main__":
     from core.obj_detector import ObjectDetector
-    from utils.logger import init_logger, get_logger
+    from utils.logger import init_logger
     from utils.config import set_config, get_config
     from utils.visualization import vis_pose_result
 
@@ -132,10 +139,8 @@ if __name__ == "__main__":
     _cfg = get_config()
 
     init_logger(_cfg)
-    _logger = get_logger()
 
     _detector = ObjectDetector(cfg=_cfg)
-
     _estimator = ViTPoseTorch(
         weight=_cfg.kept_model_path,
         device=_cfg.device,
@@ -143,7 +148,8 @@ if __name__ == "__main__":
         img_size=_cfg.kept_img_size,
         fp16=_cfg.kept_half,
         dataset_format=_cfg.kept_format,
-        model_size=_cfg.vitpose_name
+        model_size=_cfg.vitpose_name,
+        model_type=_cfg.kept_model_type
     )
     _estimator.warmup()
 
@@ -151,7 +157,6 @@ if __name__ == "__main__":
 
     t0 = _detector.detector.get_time()
     _det = _detector.run(_img)
-    _det = _det.detach().cpu().numpy()
     t1 = _detector.detector.get_time()
 
     _input_img = _img.copy()
@@ -175,4 +180,4 @@ if __name__ == "__main__":
 
     cv2.imshow('_', _img)
     cv2.waitKey(0)
-    print(f"Detector: {t1 - t0:.6f} / pre:{t3 - t2:.6f} / infer: {t4 - t3:.6f} / post: {t5 - t4:.6f}")
+    get_logger().info(f"Detector: {t1 - t0:.6f} / pre:{t3 - t2:.6f} / infer: {t4 - t3:.6f} / post: {t5 - t4:.6f}")

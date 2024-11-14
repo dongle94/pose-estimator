@@ -81,7 +81,8 @@ class RMTPoseTRT(RMTPose):
         im = np.zeros(img_size, dtype=np.float16 if self.fp16 else np.float32)  # input
 
         t = self.get_time()
-        self.infer(im)  # warmup
+        for _ in range(2):
+            self.infer(im)  # warmup
         self.logger.info(f"-- {self.kwargs['model_type']} TRT Estimator warmup: {self.get_time() - t:.6f} sec --")
 
     def preprocess(self, im, boxes):
@@ -100,11 +101,12 @@ class RMTPoseTRT(RMTPose):
             # normalize image
             resized_img = (resized_img - self.mean) / self.std
             resized_img = resized_img.transpose((2, 0, 1))[::-1]
-            resized_img = np.ascontiguousarray(resized_img)
             resized_img = resized_img.astype(np.float16) if self.fp16 else resized_img.astype(np.float32)
             inputs.append(resized_img)
 
-        inputs = np.array(inputs, dtype=np.float16 if self.fp16 else np.float32)
+        inputs = np.stack(inputs, axis=0)
+        inputs = np.ascontiguousarray(inputs)
+        inputs = inputs.astype(np.float16) if self.fp16 else inputs.astype(np.float32)
 
         return inputs, centers, scales
 
