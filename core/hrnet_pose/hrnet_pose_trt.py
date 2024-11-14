@@ -79,7 +79,8 @@ class PoseHRNetTRT(PoseHRNet):
         im = np.zeros(img_size, dtype=np.float16 if self.fp16 else np.float32)  # input
 
         t = self.get_time()
-        self.infer(im)  # warmup
+        for _ in range(2):
+            self.infer(im)  # warmup
         self.logger.info(f"-- {self.kwargs['model_type']} TRT Estimator warmup: {self.get_time() - t:.6f} sec --")
 
     def preprocess(self, im, boxes):
@@ -102,14 +103,16 @@ class PoseHRNetTRT(PoseHRNet):
             )
 
             # normalize image
-            input_img = np.ascontiguousarray(input_img).astype(np.float32)
+            input_img = input_img.astype(np.float32)
             input_img /= 255.0
             input_img = (input_img - self.mean) / self.std
             input_img = input_img.transpose((2, 0, 1))[::-1]
             input_img = np.expand_dims(input_img, 0)
             model_inputs.append(input_img)
 
-        inputs = np.array(model_inputs, dtype=np.float16 if self.fp16 else np.float32)
+        model_inputs = np.stack(model_inputs, axis=0)
+        model_inputs = np.ascontiguousarray(model_inputs)
+        inputs = model_inputs.astype(np.float16) if self.fp16 else model_inputs.astype(np.float32)
 
         return inputs, centers, scales
 
