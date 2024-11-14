@@ -116,6 +116,7 @@ class ViTPoseORT(ViTPoseBase):
             else:
                 ret = self.sess.run(self.output_names, {self.input_name: img})
                 rets.append(np.squeeze(ret))
+
         return rets
 
     def postprocess(self, preds, orig_wh, pads, bboxes):

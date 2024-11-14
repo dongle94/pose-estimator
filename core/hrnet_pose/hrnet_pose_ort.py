@@ -118,8 +118,10 @@ class PoseHRNetORT(PoseHRNet):
                 ret = self.io_binding.copy_outputs_to_cpu()[0][0]
                 rets.append(ret)
             else:
-                rets = self.sess.run(self.output_names, {self.input_name: inputs})
+                ret = self.sess.run(self.output_names, {self.input_name: img})
+                rets.append(np.squeeze(ret))
         rets = np.array(rets)
+
         return rets
 
     def postprocess(self, preds, centers, scales):
