@@ -21,8 +21,8 @@ MEDIA:
 
 # Object Detector
 DET:
-  MODEL_TYPE: yolov10
-  DET_MODEL_PATH: './weights/yolov10/yolov10m.pt'
+  MODEL_TYPE: yolov11
+  DET_MODEL_PATH: './weights/yolov11/yolo11m.pt'
   HALF: False
   CONF_THRES: 0.5
   OBJ_CLASSES: [0]
@@ -34,8 +34,8 @@ DET:
 
 # Keypoint Detector
 KEPT:
-  MODEL_TYPE: "vitpose"     # hrnet, rtmpose, vitpsoe
-  MODEL_PATH: './weights/vitpose/vitpose-b-coco.pt'
+  MODEL_TYPE: "vitpose"     # hrnet, rtmpose, vitpose
+  MODEL_PATH: './weights/vitpose/vitpose-b-coco.pth'
   HALF: False
   IMG_SIZE: [256, 192]    # [384,288], [256,192], [256,256]
   FORMAT: 'coco'      # coco, mpii, coco-hand
@@ -48,7 +48,7 @@ KEPT:
 
 # Logger
 LOG:
-  LOG_LEVEL: 'info'
+  LOG_LEVEL: 'debug'
   LOGGER_NAME: "POSE"
   CONSOLE_LOG: true
   CONSOLE_LOG_INTERVAL: 100
