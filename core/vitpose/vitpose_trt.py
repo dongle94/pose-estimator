@@ -80,7 +80,8 @@ class ViTPoseTRT(ViTPoseBase):
         im = np.zeros(img_size, dtype=np.float16 if self.fp16 else np.float32)  # input
 
         t = self.get_time()
-        self.infer(im)  # warmup
+        for _ in range(2):
+            self.infer(im)  # warmup
         self.logger.info(f"-- {self.kwargs['model_type']} TRT Estimator warmup: {self.get_time() - t:.6f} sec --")
 
     def preprocess(self, im, boxes):
