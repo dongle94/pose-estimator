@@ -78,7 +78,8 @@ class PoseEstimator(object):
                 img_size=img_size,
                 gpu_num=gpu_num,
                 fp16=fp16,
-                dataset_format=self.kept_format
+                dataset_format=self.kept_format,
+                model_type=self.estimator_type
             )
         elif self.estimator_type == 'vitpose':
             model_name = cfg.vitpose_name
@@ -104,7 +105,8 @@ class PoseEstimator(object):
                 img_size=img_size,
                 fp16=fp16,
                 dataset_format=self.kept_format,
-                model_size=model_name
+                model_size=model_name,
+                model_type=self.estimator_type
             )
         else:
             raise NotImplementedError(f'Unknown estimator type: {self.estimator_type}')
@@ -160,6 +162,7 @@ class PoseEstimator(object):
         if self.f_cnt % self.cfg.console_log_interval == 0:
             self.logger.debug(
                 f"{self.estimator_type} estimator {self.f_cnt} Frames average time - "
+                f"Total: {sum(self.ts) / self.f_cnt:.6f} sec / "
                 f"preproc: {self.ts[0] / self.f_cnt:.6f} sec / "
                 f"infer: {self.ts[1] / self.f_cnt:.6f} sec / "
                 f"postproc: {self.ts[2] / self.f_cnt:.6f} sec")
@@ -197,6 +200,8 @@ if __name__ == "__main__":
     while True:
         st = time.time()
         frame = media_loader.get_frame()
+        if frame is None:
+            break
 
         _det = _detector.run(frame)
 
@@ -214,7 +219,9 @@ if __name__ == "__main__":
         if _kept_preds is not None:
             frame = vis_pose_result(frame,
                                     pred_kepts=_kept_preds,
-                                    model=_estimator.estimator.dataset)
+                                    model=_estimator.estimator.dataset,
+                                    radius=max(frame.shape[0] // 300, 1),
+                                    thickness=max(frame.shape[0] // 1000, 1))
 
         et = time.time()
         if media_loader.is_imgs:
