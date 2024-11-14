@@ -29,6 +29,8 @@ class LoadImages(LoadSample):
         ni = len(images)
 
         self.mode = 'image'
+        self.w, self.h = -1, -1
+        self.fps = -1
         self.files = images
         self.num_files = ni
         self.count = 0
@@ -46,6 +48,7 @@ class LoadImages(LoadSample):
         self.count += 1
         im = cv2.imread(path)
         assert im is not None, f'Image Not Found {path}'
+        self.h, self.w = im.shape[:2]
         if self.bgr is False:
             im = im[..., ::-1]
 
