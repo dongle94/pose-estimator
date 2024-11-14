@@ -93,10 +93,10 @@ class PoseHRNetORT(PoseHRNet):
             )
 
             # normalize image
-            input_img = (input_img - self.mean) / self.std
-            input_img = input_img.transpose((2, 0, 1))[::-1]
             input_img = np.ascontiguousarray(input_img).astype(np.float32)
             input_img /= 255.0
+            input_img = (input_img - self.mean) / self.std
+            input_img = input_img.transpose((2, 0, 1))[::-1]
             input_img = np.expand_dims(input_img, 0)
             model_inputs.append(input_img)
 
@@ -180,7 +180,7 @@ if __name__ == '__main__':
     )
     _estimator.warmup()
 
-    _img = cv2.imread('./data/images/sample.jpg')
+    _img = cv2.imread('./data/images/army.jpg')
 
     t0 = _detector.detector.get_time()
     _det = _detector.run(_img)
