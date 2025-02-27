@@ -46,14 +46,14 @@ def set_config(file):
     config.kept_half = _config['KEPT']['HALF']
     config.kept_img_size = _config['KEPT']['IMG_SIZE']
     config.kept_format = _config['KEPT']['FORMAT']
-
     # HRNet
     config.hrnet_channel = _config['KEPT']['HRNET']['CHANNEL']
-
     # ViTPose
     config.vitpose_name = _config['KEPT']['VITPOSE']['NAME']
 
     # Logger
+    if 'LOG' not in _config:
+        raise ValueError("LOG_LEVEL is missing in config file")
     config.log_level = _config['LOG']['LOG_LEVEL']
     config.logger_name = _config['LOG']['LOGGER_NAME']
     config.console_log = _config['LOG']['CONSOLE_LOG']
