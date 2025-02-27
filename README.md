@@ -20,9 +20,7 @@ $ pip install -r ./requirements.txt
 ## Modules
 - medialoader
 - object detectors
-  - YOLOv5
-    - pytorch, onnx, trt
-  - YOLOv8, YOLOv10
+  - YOLOv5, YOLOv8, YOLOv10, YOLOv11
     - pytorch, onnx, trt
 - pose estimator
   - HRNet
