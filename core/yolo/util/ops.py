@@ -1,1465 +1,856 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
-"""Model validation metrics."""
 
+import contextlib
 import math
-import warnings
-from pathlib import Path
-from typing import Any, Dict, List, Tuple, Union
+import re
+import time
+from typing import Optional
 
+import cv2
 import numpy as np
 import torch
+import torch.nn.functional as F
 
-from core.yolo.util import DataExportMixin, SimpleClass, TryExcept, checks, plt_settings
-
-OKS_SIGMA = (
-    np.array([0.26, 0.25, 0.25, 0.35, 0.35, 0.79, 0.79, 0.72, 0.72, 0.62, 0.62, 1.07, 1.07, 0.87, 0.87, 0.89, 0.89])
-    / 10.0
-)
+from core.yolo.util.metrics import batch_probiou
 
 
-def bbox_ioa(box1: np.ndarray, box2: np.ndarray, iou: bool = False, eps: float = 1e-7) -> np.ndarray:
+class Profile(contextlib.ContextDecorator):
     """
-    Calculate the intersection over box2 area given box1 and box2.
+    Ultralytics Profile class for timing code execution.
 
-    Args:
-        box1 (np.ndarray): A numpy array of shape (N, 4) representing N bounding boxes in x1y1x2y2 format.
-        box2 (np.ndarray): A numpy array of shape (M, 4) representing M bounding boxes in x1y1x2y2 format.
-        iou (bool, optional): Calculate the standard IoU if True else return inter_area/box2_area.
-        eps (float, optional): A small value to avoid division by zero.
-
-    Returns:
-        (np.ndarray): A numpy array of shape (N, M) representing the intersection over box2 area.
-    """
-    # Get the coordinates of bounding boxes
-    b1_x1, b1_y1, b1_x2, b1_y2 = box1.T
-    b2_x1, b2_y1, b2_x2, b2_y2 = box2.T
-
-    # Intersection area
-    inter_area = (np.minimum(b1_x2[:, None], b2_x2) - np.maximum(b1_x1[:, None], b2_x1)).clip(0) * (
-        np.minimum(b1_y2[:, None], b2_y2) - np.maximum(b1_y1[:, None], b2_y1)
-    ).clip(0)
-
-    # Box2 area
-    area = (b2_x2 - b2_x1) * (b2_y2 - b2_y1)
-    if iou:
-        box1_area = (b1_x2 - b1_x1) * (b1_y2 - b1_y1)
-        area = area + box1_area[:, None] - inter_area
-
-    # Intersection over box2 area
-    return inter_area / (area + eps)
-
-
-def box_iou(box1: torch.Tensor, box2: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
-    """
-    Calculate intersection-over-union (IoU) of boxes.
-
-    Args:
-        box1 (torch.Tensor): A tensor of shape (N, 4) representing N bounding boxes in (x1, y1, x2, y2) format.
-        box2 (torch.Tensor): A tensor of shape (M, 4) representing M bounding boxes in (x1, y1, x2, y2) format.
-        eps (float, optional): A small value to avoid division by zero.
-
-    Returns:
-        (torch.Tensor): An NxM tensor containing the pairwise IoU values for every element in box1 and box2.
-
-    References:
-        https://github.com/pytorch/vision/blob/main/torchvision/ops/boxes.py
-    """
-    # NOTE: Need .float() to get accurate iou values
-    # inter(N,M) = (rb(N,M,2) - lt(N,M,2)).clamp(0).prod(2)
-    (a1, a2), (b1, b2) = box1.float().unsqueeze(1).chunk(2, 2), box2.float().unsqueeze(0).chunk(2, 2)
-    inter = (torch.min(a2, b2) - torch.max(a1, b1)).clamp_(0).prod(2)
-
-    # IoU = inter / (area1 + area2 - inter)
-    return inter / ((a2 - a1).prod(2) + (b2 - b1).prod(2) - inter + eps)
-
-
-def bbox_iou(
-    box1: torch.Tensor,
-    box2: torch.Tensor,
-    xywh: bool = True,
-    GIoU: bool = False,
-    DIoU: bool = False,
-    CIoU: bool = False,
-    eps: float = 1e-7,
-) -> torch.Tensor:
-    """
-    Calculate the Intersection over Union (IoU) between bounding boxes.
-
-    This function supports various shapes for `box1` and `box2` as long as the last dimension is 4.
-    For instance, you may pass tensors shaped like (4,), (N, 4), (B, N, 4), or (B, N, 1, 4).
-    Internally, the code will split the last dimension into (x, y, w, h) if `xywh=True`,
-    or (x1, y1, x2, y2) if `xywh=False`.
-
-    Args:
-        box1 (torch.Tensor): A tensor representing one or more bounding boxes, with the last dimension being 4.
-        box2 (torch.Tensor): A tensor representing one or more bounding boxes, with the last dimension being 4.
-        xywh (bool, optional): If True, input boxes are in (x, y, w, h) format. If False, input boxes are in
-                               (x1, y1, x2, y2) format.
-        GIoU (bool, optional): If True, calculate Generalized IoU.
-        DIoU (bool, optional): If True, calculate Distance IoU.
-        CIoU (bool, optional): If True, calculate Complete IoU.
-        eps (float, optional): A small value to avoid division by zero.
-
-    Returns:
-        (torch.Tensor): IoU, GIoU, DIoU, or CIoU values depending on the specified flags.
-    """
-    # Get the coordinates of bounding boxes
-    if xywh:  # transform from xywh to xyxy
-        (x1, y1, w1, h1), (x2, y2, w2, h2) = box1.chunk(4, -1), box2.chunk(4, -1)
-        w1_, h1_, w2_, h2_ = w1 / 2, h1 / 2, w2 / 2, h2 / 2
-        b1_x1, b1_x2, b1_y1, b1_y2 = x1 - w1_, x1 + w1_, y1 - h1_, y1 + h1_
-        b2_x1, b2_x2, b2_y1, b2_y2 = x2 - w2_, x2 + w2_, y2 - h2_, y2 + h2_
-    else:  # x1, y1, x2, y2 = box1
-        b1_x1, b1_y1, b1_x2, b1_y2 = box1.chunk(4, -1)
-        b2_x1, b2_y1, b2_x2, b2_y2 = box2.chunk(4, -1)
-        w1, h1 = b1_x2 - b1_x1, b1_y2 - b1_y1 + eps
-        w2, h2 = b2_x2 - b2_x1, b2_y2 - b2_y1 + eps
-
-    # Intersection area
-    inter = (b1_x2.minimum(b2_x2) - b1_x1.maximum(b2_x1)).clamp_(0) * (
-        b1_y2.minimum(b2_y2) - b1_y1.maximum(b2_y1)
-    ).clamp_(0)
-
-    # Union Area
-    union = w1 * h1 + w2 * h2 - inter + eps
-
-    # IoU
-    iou = inter / union
-    if CIoU or DIoU or GIoU:
-        cw = b1_x2.maximum(b2_x2) - b1_x1.minimum(b2_x1)  # convex (smallest enclosing box) width
-        ch = b1_y2.maximum(b2_y2) - b1_y1.minimum(b2_y1)  # convex height
-        if CIoU or DIoU:  # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1
-            c2 = cw.pow(2) + ch.pow(2) + eps  # convex diagonal squared
-            rho2 = (
-                (b2_x1 + b2_x2 - b1_x1 - b1_x2).pow(2) + (b2_y1 + b2_y2 - b1_y1 - b1_y2).pow(2)
-            ) / 4  # center dist**2
-            if CIoU:  # https://github.com/Zzh-tju/DIoU-SSD-pytorch/blob/master/utils/box/box_utils.py#L47
-                v = (4 / math.pi**2) * ((w2 / h2).atan() - (w1 / h1).atan()).pow(2)
-                with torch.no_grad():
-                    alpha = v / (v - iou + (1 + eps))
-                return iou - (rho2 / c2 + v * alpha)  # CIoU
-            return iou - rho2 / c2  # DIoU
-        c_area = cw * ch + eps  # convex area
-        return iou - (c_area - union) / c_area  # GIoU https://arxiv.org/pdf/1902.09630.pdf
-    return iou  # IoU
-
-
-def mask_iou(mask1: torch.Tensor, mask2: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
-    """
-    Calculate masks IoU.
-
-    Args:
-        mask1 (torch.Tensor): A tensor of shape (N, n) where N is the number of ground truth objects and n is the
-                        product of image width and height.
-        mask2 (torch.Tensor): A tensor of shape (M, n) where M is the number of predicted objects and n is the
-                        product of image width and height.
-        eps (float, optional): A small value to avoid division by zero.
-
-    Returns:
-        (torch.Tensor): A tensor of shape (N, M) representing masks IoU.
-    """
-    intersection = torch.matmul(mask1, mask2.T).clamp_(0)
-    union = (mask1.sum(1)[:, None] + mask2.sum(1)[None]) - intersection  # (area1 + area2) - intersection
-    return intersection / (union + eps)
-
-
-def kpt_iou(
-    kpt1: torch.Tensor, kpt2: torch.Tensor, area: torch.Tensor, sigma: List[float], eps: float = 1e-7
-) -> torch.Tensor:
-    """
-    Calculate Object Keypoint Similarity (OKS).
-
-    Args:
-        kpt1 (torch.Tensor): A tensor of shape (N, 17, 3) representing ground truth keypoints.
-        kpt2 (torch.Tensor): A tensor of shape (M, 17, 3) representing predicted keypoints.
-        area (torch.Tensor): A tensor of shape (N,) representing areas from ground truth.
-        sigma (list): A list containing 17 values representing keypoint scales.
-        eps (float, optional): A small value to avoid division by zero.
-
-    Returns:
-        (torch.Tensor): A tensor of shape (N, M) representing keypoint similarities.
-    """
-    d = (kpt1[:, None, :, 0] - kpt2[..., 0]).pow(2) + (kpt1[:, None, :, 1] - kpt2[..., 1]).pow(2)  # (N, M, 17)
-    sigma = torch.tensor(sigma, device=kpt1.device, dtype=kpt1.dtype)  # (17, )
-    kpt_mask = kpt1[..., 2] != 0  # (N, 17)
-    e = d / ((2 * sigma).pow(2) * (area[:, None, None] + eps) * 2)  # from cocoeval
-    # e = d / ((area[None, :, None] + eps) * sigma) ** 2 / 2  # from formula
-    return ((-e).exp() * kpt_mask[:, None]).sum(-1) / (kpt_mask.sum(-1)[:, None] + eps)
-
-
-def _get_covariance_matrix(boxes: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Generate covariance matrix from oriented bounding boxes.
-
-    Args:
-        boxes (torch.Tensor): A tensor of shape (N, 5) representing rotated bounding boxes, with xywhr format.
-
-    Returns:
-        (torch.Tensor): Covariance matrices corresponding to original rotated bounding boxes.
-    """
-    # Gaussian bounding boxes, ignore the center points (the first two columns) because they are not needed here.
-    gbbs = torch.cat((boxes[:, 2:4].pow(2) / 12, boxes[:, 4:]), dim=-1)
-    a, b, c = gbbs.split(1, dim=-1)
-    cos = c.cos()
-    sin = c.sin()
-    cos2 = cos.pow(2)
-    sin2 = sin.pow(2)
-    return a * cos2 + b * sin2, a * sin2 + b * cos2, (a - b) * cos * sin
-
-
-def probiou(obb1: torch.Tensor, obb2: torch.Tensor, CIoU: bool = False, eps: float = 1e-7) -> torch.Tensor:
-    """
-    Calculate probabilistic IoU between oriented bounding boxes.
-
-    Args:
-        obb1 (torch.Tensor): Ground truth OBBs, shape (N, 5), format xywhr.
-        obb2 (torch.Tensor): Predicted OBBs, shape (N, 5), format xywhr.
-        CIoU (bool, optional): If True, calculate CIoU.
-        eps (float, optional): Small value to avoid division by zero.
-
-    Returns:
-        (torch.Tensor): OBB similarities, shape (N,).
-
-    Notes:
-        OBB format: [center_x, center_y, width, height, rotation_angle].
-
-    References:
-        https://arxiv.org/pdf/2106.06072v1.pdf
-    """
-    x1, y1 = obb1[..., :2].split(1, dim=-1)
-    x2, y2 = obb2[..., :2].split(1, dim=-1)
-    a1, b1, c1 = _get_covariance_matrix(obb1)
-    a2, b2, c2 = _get_covariance_matrix(obb2)
-
-    t1 = (
-        ((a1 + a2) * (y1 - y2).pow(2) + (b1 + b2) * (x1 - x2).pow(2)) / ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2) + eps)
-    ) * 0.25
-    t2 = (((c1 + c2) * (x2 - x1) * (y1 - y2)) / ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2) + eps)) * 0.5
-    t3 = (
-        ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2))
-        / (4 * ((a1 * b1 - c1.pow(2)).clamp_(0) * (a2 * b2 - c2.pow(2)).clamp_(0)).sqrt() + eps)
-        + eps
-    ).log() * 0.5
-    bd = (t1 + t2 + t3).clamp(eps, 100.0)
-    hd = (1.0 - (-bd).exp() + eps).sqrt()
-    iou = 1 - hd
-    if CIoU:  # only include the wh aspect ratio part
-        w1, h1 = obb1[..., 2:4].split(1, dim=-1)
-        w2, h2 = obb2[..., 2:4].split(1, dim=-1)
-        v = (4 / math.pi**2) * ((w2 / h2).atan() - (w1 / h1).atan()).pow(2)
-        with torch.no_grad():
-            alpha = v / (v - iou + (1 + eps))
-        return iou - v * alpha  # CIoU
-    return iou
-
-
-def batch_probiou(
-    obb1: Union[torch.Tensor, np.ndarray], obb2: Union[torch.Tensor, np.ndarray], eps: float = 1e-7
-) -> torch.Tensor:
-    """
-    Calculate the probabilistic IoU between oriented bounding boxes.
-
-    Args:
-        obb1 (torch.Tensor | np.ndarray): A tensor of shape (N, 5) representing ground truth obbs, with xywhr format.
-        obb2 (torch.Tensor | np.ndarray): A tensor of shape (M, 5) representing predicted obbs, with xywhr format.
-        eps (float, optional): A small value to avoid division by zero.
-
-    Returns:
-        (torch.Tensor): A tensor of shape (N, M) representing obb similarities.
-
-    References:
-        https://arxiv.org/pdf/2106.06072v1.pdf
-    """
-    obb1 = torch.from_numpy(obb1) if isinstance(obb1, np.ndarray) else obb1
-    obb2 = torch.from_numpy(obb2) if isinstance(obb2, np.ndarray) else obb2
-
-    x1, y1 = obb1[..., :2].split(1, dim=-1)
-    x2, y2 = (x.squeeze(-1)[None] for x in obb2[..., :2].split(1, dim=-1))
-    a1, b1, c1 = _get_covariance_matrix(obb1)
-    a2, b2, c2 = (x.squeeze(-1)[None] for x in _get_covariance_matrix(obb2))
-
-    t1 = (
-        ((a1 + a2) * (y1 - y2).pow(2) + (b1 + b2) * (x1 - x2).pow(2)) / ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2) + eps)
-    ) * 0.25
-    t2 = (((c1 + c2) * (x2 - x1) * (y1 - y2)) / ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2) + eps)) * 0.5
-    t3 = (
-        ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2))
-        / (4 * ((a1 * b1 - c1.pow(2)).clamp_(0) * (a2 * b2 - c2.pow(2)).clamp_(0)).sqrt() + eps)
-        + eps
-    ).log() * 0.5
-    bd = (t1 + t2 + t3).clamp(eps, 100.0)
-    hd = (1.0 - (-bd).exp() + eps).sqrt()
-    return 1 - hd
-
-
-def smooth_bce(eps: float = 0.1) -> Tuple[float, float]:
-    """
-    Compute smoothed positive and negative Binary Cross-Entropy targets.
-
-    Args:
-        eps (float, optional): The epsilon value for label smoothing.
-
-    Returns:
-        pos (float): Positive label smoothing BCE target.
-        neg (float): Negative label smoothing BCE target.
-
-    References:
-        https://github.com/ultralytics/yolov3/issues/238#issuecomment-598028441
-    """
-    return 1.0 - 0.5 * eps, 0.5 * eps
-
-
-class ConfusionMatrix(DataExportMixin):
-    """
-    A class for calculating and updating a confusion matrix for object detection and classification tasks.
+    Use as a decorator with @Profile() or as a context manager with 'with Profile():'. Provides accurate timing
+    measurements with CUDA synchronization support for GPU operations.
 
     Attributes:
-        task (str): The type of task, either 'detect' or 'classify'.
-        matrix (np.ndarray): The confusion matrix, with dimensions depending on the task.
-        nc (int): The number of category.
-        names (List[str]): The names of the classes, used as labels on the plot.
+        t (float): Accumulated time in seconds.
+        device (torch.device): Device used for model inference.
+        cuda (bool): Whether CUDA is being used for timing synchronization.
+
+    Examples:
+        Use as a context manager to time code execution
+        >>> with Profile(device=device) as dt:
+        ...     pass  # slow operation here
+        >>> print(dt)  # prints "Elapsed time is 9.5367431640625e-07 s"
+
+        Use as a decorator to time function execution
+        >>> @Profile()
+        ... def slow_function():
+        ...     time.sleep(0.1)
     """
 
-    def __init__(self, names: List[str] = [], task: str = "detect"):
+    def __init__(self, t: float = 0.0, device: Optional[torch.device] = None):
         """
-        Initialize a ConfusionMatrix instance.
+        Initialize the Profile class.
 
         Args:
-            names (List[str], optional): Names of classes, used as labels on the plot.
-            task (str, optional): Type of task, either 'detect' or 'classify'.
+            t (float): Initial accumulated time in seconds.
+            device (torch.device, optional): Device used for model inference to enable CUDA synchronization.
         """
-        self.task = task
-        self.nc = len(names)  # number of classes
-        self.matrix = np.zeros((self.nc + 1, self.nc + 1)) if self.task == "detect" else np.zeros((self.nc, self.nc))
-        self.names = names  # name of classes
+        self.t = t
+        self.device = device
+        self.cuda = bool(device and str(device).startswith("cuda"))
 
-    def process_cls_preds(self, preds, targets):
-        """
-        Update confusion matrix for classification task.
+    def __enter__(self):
+        """Start timing."""
+        self.start = self.time()
+        return self
 
-        Args:
-            preds (Array[N, min(nc,5)]): Predicted class labels.
-            targets (Array[N, 1]): Ground truth class labels.
-        """
-        preds, targets = torch.cat(preds)[:, 0], torch.cat(targets)
-        for p, t in zip(preds.cpu().numpy(), targets.cpu().numpy()):
-            self.matrix[p][t] += 1
+    def __exit__(self, type, value, traceback):  # noqa
+        """Stop timing."""
+        self.dt = self.time() - self.start  # delta-time
+        self.t += self.dt  # accumulate dt
 
-    def process_batch(
-        self, detections: Dict[str, torch.Tensor], batch: Dict[str, Any], conf: float = 0.25, iou_thres: float = 0.45
-    ) -> None:
-        """
-        Update confusion matrix for object detection task.
+    def __str__(self):
+        """Return a human-readable string representing the accumulated elapsed time."""
+        return f"Elapsed time is {self.t} s"
 
-        Args:
-            detections (Dict[str, torch.Tensor]): Dictionary containing detected bounding boxes and their associated information.
-                                       Should contain 'cls', 'conf', and 'bboxes' keys, where 'bboxes' can be
-                                       Array[N, 4] for regular boxes or Array[N, 5] for OBB with angle.
-            batch (Dict[str, Any]): Batch dictionary containing ground truth data with 'bboxes' (Array[M, 4]| Array[M, 5]) and
-                'cls' (Array[M]) keys, where M is the number of ground truth objects.
-            conf (float, optional): Confidence threshold for detections.
-            iou_thres (float, optional): IoU threshold for matching detections to ground truth.
-        """
-        conf = 0.25 if conf in {None, 0.001} else conf  # apply 0.25 if default val conf is passed
-        gt_cls, gt_bboxes = batch["cls"], batch["bboxes"]
-        no_pred = len(detections["cls"]) == 0
-        if gt_cls.shape[0] == 0:  # Check if labels is empty
-            if not no_pred:
-                detections = {k: detections[k][detections["conf"] > conf] for k in {"cls", "bboxes"}}
-                detection_classes = detections["cls"].int().tolist()
-                for dc in detection_classes:
-                    self.matrix[dc, self.nc] += 1  # false positives
-            return
-        if no_pred:
-            gt_classes = gt_cls.int().tolist()
-            for gc in gt_classes:
-                self.matrix[self.nc, gc] += 1  # background FN
-            return
-
-        detections = {k: detections[k][detections["conf"] > conf] for k in {"cls", "bboxes"}}
-        gt_classes = gt_cls.int().tolist()
-        detection_classes = detections["cls"].int().tolist()
-        bboxes = detections["bboxes"]
-        is_obb = bboxes.shape[1] == 5  # check if detections contains angle for OBB
-        iou = batch_probiou(gt_bboxes, bboxes) if is_obb else box_iou(gt_bboxes, bboxes)
-
-        x = torch.where(iou > iou_thres)
-        if x[0].shape[0]:
-            matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()
-            if x[0].shape[0] > 1:
-                matches = matches[matches[:, 2].argsort()[::-1]]
-                matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
-                matches = matches[matches[:, 2].argsort()[::-1]]
-                matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
-        else:
-            matches = np.zeros((0, 3))
-
-        n = matches.shape[0] > 0
-        m0, m1, _ = matches.transpose().astype(int)
-        for i, gc in enumerate(gt_classes):
-            j = m0 == i
-            if n and sum(j) == 1:
-                self.matrix[detection_classes[m1[j].item()], gc] += 1  # correct
-            else:
-                self.matrix[self.nc, gc] += 1  # true background
-
-        for i, dc in enumerate(detection_classes):
-            if not any(m1 == i):
-                self.matrix[dc, self.nc] += 1  # predicted background
-
-    def matrix(self):
-        """Return the confusion matrix."""
-        return self.matrix
-
-    def tp_fp(self) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Return true positives and false positives.
-
-        Returns:
-            tp (np.ndarray): True positives.
-            fp (np.ndarray): False positives.
-        """
-        tp = self.matrix.diagonal()  # true positives
-        fp = self.matrix.sum(1) - tp  # false positives
-        # fn = self.matrix.sum(0) - tp  # false negatives (missed detections)
-        return (tp[:-1], fp[:-1]) if self.task == "detect" else (tp, fp)  # remove background class if task=detect
-
-    @TryExcept(msg="ConfusionMatrix plot failure")
-    @plt_settings()
-    def plot(self, normalize: bool = True, save_dir: str = "", on_plot=None):
-        """
-        Plot the confusion matrix using matplotlib and save it to a file.
-
-        Args:
-            normalize (bool, optional): Whether to normalize the confusion matrix.
-            save_dir (str, optional): Directory where the plot will be saved.
-            on_plot (callable, optional): An optional callback to pass plots path and data when they are rendered.
-        """
-        import matplotlib.pyplot as plt  # scope for faster 'import ultralytics'
-
-        array = self.matrix / ((self.matrix.sum(0).reshape(1, -1) + 1e-9) if normalize else 1)  # normalize columns
-        array[array < 0.005] = np.nan  # don't annotate (would appear as 0.00)
-
-        fig, ax = plt.subplots(1, 1, figsize=(12, 9))
-        if self.nc >= 100:  # downsample for large class count
-            k = max(2, self.nc // 60)  # step size for downsampling, always > 1
-            keep_idx = slice(None, None, k)  # create slice instead of array
-            self.names = self.names[keep_idx]  # slice class names
-            array = array[keep_idx, :][:, keep_idx]  # slice matrix rows and cols
-            n = (self.nc + k - 1) // k  # number of retained classes
-            nc = nn = n if self.task == "classify" else n + 1  # adjust for background if needed
-        else:
-            nc = nn = self.nc if self.task == "classify" else self.nc + 1
-        ticklabels = (self.names + ["background"]) if (0 < nn < 99) and (nn == nc) else "auto"
-        xy_ticks = np.arange(len(ticklabels))
-        tick_fontsize = max(6, 15 - 0.1 * nc)  # Minimum size is 6
-        label_fontsize = max(6, 12 - 0.1 * nc)
-        title_fontsize = max(6, 12 - 0.1 * nc)
-        btm = max(0.1, 0.25 - 0.001 * nc)  # Minimum value is 0.1
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")  # suppress empty matrix RuntimeWarning: All-NaN slice encountered
-            im = ax.imshow(array, cmap="Blues", vmin=0.0, interpolation="none")
-            ax.xaxis.set_label_position("bottom")
-            if nc < 30:  # Add score for each cell of confusion matrix
-                color_threshold = 0.45 * (1 if normalize else np.nanmax(array))  # text color threshold
-                for i, row in enumerate(array[:nc]):
-                    for j, val in enumerate(row[:nc]):
-                        val = array[i, j]
-                        if np.isnan(val):
-                            continue
-                        ax.text(
-                            j,
-                            i,
-                            f"{val:.2f}" if normalize else f"{int(val)}",
-                            ha="center",
-                            va="center",
-                            fontsize=10,
-                            color="white" if val > color_threshold else "black",
-                        )
-            cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.05)
-        title = "Confusion Matrix" + " Normalized" * normalize
-        ax.set_xlabel("True", fontsize=label_fontsize, labelpad=10)
-        ax.set_ylabel("Predicted", fontsize=label_fontsize, labelpad=10)
-        ax.set_title(title, fontsize=title_fontsize, pad=20)
-        ax.set_xticks(xy_ticks)
-        ax.set_yticks(xy_ticks)
-        ax.tick_params(axis="x", bottom=True, top=False, labelbottom=True, labeltop=False)
-        ax.tick_params(axis="y", left=True, right=False, labelleft=True, labelright=False)
-        if ticklabels != "auto":
-            ax.set_xticklabels(ticklabels, fontsize=tick_fontsize, rotation=90, ha="center")
-            ax.set_yticklabels(ticklabels, fontsize=tick_fontsize)
-        for s in ["left", "right", "bottom", "top", "outline"]:
-            if s != "outline":
-                ax.spines[s].set_visible(False)  # Confusion matrix plot don't have outline
-            cbar.ax.spines[s].set_visible(False)
-        fig.subplots_adjust(left=0, right=0.84, top=0.94, bottom=btm)  # Adjust layout to ensure equal margins
-        plot_fname = Path(save_dir) / f"{title.lower().replace(' ', '_')}.png"
-        fig.savefig(plot_fname, dpi=250)
-        plt.close(fig)
-        if on_plot:
-            on_plot(plot_fname)
-
-    def print(self):
-        """Print the confusion matrix to the console."""
-        for i in range(self.matrix.shape[0]):
-            print("Info: ", " ".join(map(str, self.matrix[i])))
-
-    def summary(self, normalize: bool = False, decimals: int = 5) -> List[Dict[str, float]]:
-        """
-        Generate a summarized representation of the confusion matrix as a list of dictionaries, with optional
-        normalization. This is useful for exporting the matrix to various formats such as CSV, XML, HTML, JSON, or SQL.
-
-        Args:
-            normalize (bool): Whether to normalize the confusion matrix values.
-            decimals (int): Number of decimal places to round the output values to.
-
-        Returns:
-            (List[Dict[str, float]]): A list of dictionaries, each representing one predicted class with corresponding values for all actual classes.
-
-        Examples:
-            >>> results = model.val(data="coco8.yaml", plots=True)
-            >>> cm_dict = results.confusion_matrix.summary(normalize=True, decimals=5)
-            >>> print(cm_dict)
-        """
-        import re
-
-        names = self.names if self.task == "classify" else self.names + ["background"]
-        clean_names, seen = [], set()
-        for name in names:
-            clean_name = re.sub(r"[^a-zA-Z0-9_]", "_", name)
-            original_clean = clean_name
-            counter = 1
-            while clean_name.lower() in seen:
-                clean_name = f"{original_clean}_{counter}"
-                counter += 1
-            seen.add(clean_name.lower())
-            clean_names.append(clean_name)
-        array = (self.matrix / ((self.matrix.sum(0).reshape(1, -1) + 1e-9) if normalize else 1)).round(decimals)
-        return [
-            dict({"Predicted": clean_names[i]}, **{clean_names[j]: array[i, j] for j in range(len(clean_names))})
-            for i in range(len(clean_names))
-        ]
+    def time(self):
+        """Get current time with CUDA synchronization if applicable."""
+        if self.cuda:
+            torch.cuda.synchronize(self.device)
+        return time.perf_counter()
 
 
-def smooth(y: np.ndarray, f: float = 0.05) -> np.ndarray:
-    """Box filter of fraction f."""
-    nf = round(len(y) * f * 2) // 2 + 1  # number of filter elements (must be odd)
-    p = np.ones(nf // 2)  # ones padding
-    yp = np.concatenate((p * y[0], y, p * y[-1]), 0)  # y padded
-    return np.convolve(yp, np.ones(nf) / nf, mode="valid")  # y-smoothed
-
-
-@plt_settings()
-def plot_pr_curve(
-    px: np.ndarray,
-    py: np.ndarray,
-    ap: np.ndarray,
-    save_dir: Path = Path("pr_curve.png"),
-    names: Dict[int, str] = {},
-    on_plot=None,
-):
+def segment2box(segment, width: int = 640, height: int = 640):
     """
-    Plot precision-recall curve.
+    Convert segment coordinates to bounding box coordinates.
+
+    Converts a single segment label to a box label by finding the minimum and maximum x and y coordinates.
+    Applies inside-image constraint and clips coordinates when necessary.
 
     Args:
-        px (np.ndarray): X values for the PR curve.
-        py (np.ndarray): Y values for the PR curve.
-        ap (np.ndarray): Average precision values.
-        save_dir (Path, optional): Path to save the plot.
-        names (Dict[int, str], optional): Dictionary mapping class indices to class names.
-        on_plot (callable, optional): Function to call after plot is saved.
-    """
-    import matplotlib.pyplot as plt  # scope for faster 'import ultralytics'
-
-    fig, ax = plt.subplots(1, 1, figsize=(9, 6), tight_layout=True)
-    py = np.stack(py, axis=1)
-
-    if 0 < len(names) < 21:  # display per-class legend if < 21 classes
-        for i, y in enumerate(py.T):
-            ax.plot(px, y, linewidth=1, label=f"{names[i]} {ap[i, 0]:.3f}")  # plot(recall, precision)
-    else:
-        ax.plot(px, py, linewidth=1, color="grey")  # plot(recall, precision)
-
-    ax.plot(px, py.mean(1), linewidth=3, color="blue", label=f"all classes {ap[:, 0].mean():.3f} mAP@0.5")
-    ax.set_xlabel("Recall")
-    ax.set_ylabel("Precision")
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
-    ax.set_title("Precision-Recall Curve")
-    fig.savefig(save_dir, dpi=250)
-    plt.close(fig)
-    if on_plot:
-        on_plot(save_dir)
-
-
-@plt_settings()
-def plot_mc_curve(
-    px: np.ndarray,
-    py: np.ndarray,
-    save_dir: Path = Path("mc_curve.png"),
-    names: Dict[int, str] = {},
-    xlabel: str = "Confidence",
-    ylabel: str = "Metric",
-    on_plot=None,
-):
-    """
-    Plot metric-confidence curve.
-
-    Args:
-        px (np.ndarray): X values for the metric-confidence curve.
-        py (np.ndarray): Y values for the metric-confidence curve.
-        save_dir (Path, optional): Path to save the plot.
-        names (Dict[int, str], optional): Dictionary mapping class indices to class names.
-        xlabel (str, optional): X-axis label.
-        ylabel (str, optional): Y-axis label.
-        on_plot (callable, optional): Function to call after plot is saved.
-    """
-    import matplotlib.pyplot as plt  # scope for faster 'import ultralytics'
-
-    fig, ax = plt.subplots(1, 1, figsize=(9, 6), tight_layout=True)
-
-    if 0 < len(names) < 21:  # display per-class legend if < 21 classes
-        for i, y in enumerate(py):
-            ax.plot(px, y, linewidth=1, label=f"{names[i]}")  # plot(confidence, metric)
-    else:
-        ax.plot(px, py.T, linewidth=1, color="grey")  # plot(confidence, metric)
-
-    y = smooth(py.mean(0), 0.1)
-    ax.plot(px, y, linewidth=3, color="blue", label=f"all classes {y.max():.2f} at {px[y.argmax()]:.3f}")
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
-    ax.set_title(f"{ylabel}-Confidence Curve")
-    fig.savefig(save_dir, dpi=250)
-    plt.close(fig)
-    if on_plot:
-        on_plot(save_dir)
-
-
-def compute_ap(recall: List[float], precision: List[float]) -> Tuple[float, np.ndarray, np.ndarray]:
-    """
-    Compute the average precision (AP) given the recall and precision curves.
-
-    Args:
-        recall (list): The recall curve.
-        precision (list): The precision curve.
+        segment (torch.Tensor): Segment coordinates in format (N, 2) where N is number of points.
+        width (int): Width of the image in pixels.
+        height (int): Height of the image in pixels.
 
     Returns:
-        ap (float): Average precision.
-        mpre (np.ndarray): Precision envelope curve.
-        mrec (np.ndarray): Modified recall curve with sentinel values added at the beginning and end.
+        (np.ndarray): Bounding box coordinates in xyxy format [x1, y1, x2, y2].
     """
-    # Append sentinel values to beginning and end
-    mrec = np.concatenate(([0.0], recall, [1.0]))
-    mpre = np.concatenate(([1.0], precision, [0.0]))
-
-    # Compute the precision envelope
-    mpre = np.flip(np.maximum.accumulate(np.flip(mpre)))
-
-    # Integrate area under curve
-    method = "interp"  # methods: 'continuous', 'interp'
-    if method == "interp":
-        x = np.linspace(0, 1, 101)  # 101-point interp (COCO)
-        func = np.trapezoid if checks.check_version(np.__version__, ">=2.0") else np.trapz  # np.trapz deprecated
-        ap = func(np.interp(x, mrec, mpre), x)  # integrate
-    else:  # 'continuous'
-        i = np.where(mrec[1:] != mrec[:-1])[0]  # points where x-axis (recall) changes
-        ap = np.sum((mrec[i + 1] - mrec[i]) * mpre[i + 1])  # area under curve
-
-    return ap, mpre, mrec
+    x, y = segment.T  # segment xy
+    # Clip coordinates if 3 out of 4 sides are outside the image
+    if np.array([x.min() < 0, y.min() < 0, x.max() > width, y.max() > height]).sum() >= 3:
+        x = x.clip(0, width)
+        y = y.clip(0, height)
+    inside = (x >= 0) & (y >= 0) & (x <= width) & (y <= height)
+    x = x[inside]
+    y = y[inside]
+    return (
+        np.array([x.min(), y.min(), x.max(), y.max()], dtype=segment.dtype)
+        if any(x)
+        else np.zeros(4, dtype=segment.dtype)
+    )  # xyxy
 
 
-def ap_per_class(
-    tp: np.ndarray,
-    conf: np.ndarray,
-    pred_cls: np.ndarray,
-    target_cls: np.ndarray,
-    plot: bool = False,
-    on_plot=None,
-    save_dir: Path = Path(),
-    names: Dict[int, str] = {},
-    eps: float = 1e-16,
-    prefix: str = "",
-) -> Tuple:
+def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None, padding: bool = True, xywh: bool = False):
     """
-    Compute the average precision per class for object detection evaluation.
+    Rescale bounding boxes from one image shape to another.
+
+    Rescales bounding boxes from img1_shape to img0_shape, accounting for padding and aspect ratio changes.
+    Supports both xyxy and xywh box formats.
 
     Args:
-        tp (np.ndarray): Binary array indicating whether the detection is correct (True) or not (False).
-        conf (np.ndarray): Array of confidence scores of the detections.
-        pred_cls (np.ndarray): Array of predicted classes of the detections.
-        target_cls (np.ndarray): Array of true classes of the detections.
-        plot (bool, optional): Whether to plot PR curves or not.
-        on_plot (callable, optional): A callback to pass plots path and data when they are rendered.
-        save_dir (Path, optional): Directory to save the PR curves.
-        names (Dict[int, str], optional): Dictionary of class names to plot PR curves.
-        eps (float, optional): A small value to avoid division by zero.
-        prefix (str, optional): A prefix string for saving the plot files.
+        img1_shape (tuple): Shape of the source image (height, width).
+        boxes (torch.Tensor): Bounding boxes to rescale in format (N, 4).
+        img0_shape (tuple): Shape of the target image (height, width).
+        ratio_pad (tuple, optional): Tuple of (ratio, pad) for scaling. If None, calculated from image shapes.
+        padding (bool): Whether boxes are based on YOLO-style augmented images with padding.
+        xywh (bool): Whether box format is xywh (True) or xyxy (False).
 
     Returns:
-        tp (np.ndarray): True positive counts at threshold given by max F1 metric for each class.
-        fp (np.ndarray): False positive counts at threshold given by max F1 metric for each class.
-        p (np.ndarray): Precision values at threshold given by max F1 metric for each class.
-        r (np.ndarray): Recall values at threshold given by max F1 metric for each class.
-        f1 (np.ndarray): F1-score values at threshold given by max F1 metric for each class.
-        ap (np.ndarray): Average precision for each class at different IoU thresholds.
-        unique_classes (np.ndarray): An array of unique classes that have data.
-        p_curve (np.ndarray): Precision curves for each class.
-        r_curve (np.ndarray): Recall curves for each class.
-        f1_curve (np.ndarray): F1-score curves for each class.
-        x (np.ndarray): X-axis values for the curves.
-        prec_values (np.ndarray): Precision values at mAP@0.5 for each class.
+        (torch.Tensor): Rescaled bounding boxes in the same format as input.
     """
-    # Sort by objectness
-    i = np.argsort(-conf)
-    tp, conf, pred_cls = tp[i], conf[i], pred_cls[i]
+    if ratio_pad is None:  # calculate from img0_shape
+        gain = min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])  # gain  = old / new
+        pad = (
+            round((img1_shape[1] - img0_shape[1] * gain) / 2 - 0.1),
+            round((img1_shape[0] - img0_shape[0] * gain) / 2 - 0.1),
+        )  # wh padding
+    else:
+        gain = ratio_pad[0][0]
+        pad = ratio_pad[1]
 
-    # Find unique classes
-    unique_classes, nt = np.unique(target_cls, return_counts=True)
-    nc = unique_classes.shape[0]  # number of classes, number of detections
+    if padding:
+        boxes[..., 0] -= pad[0]  # x padding
+        boxes[..., 1] -= pad[1]  # y padding
+        if not xywh:
+            boxes[..., 2] -= pad[0]  # x padding
+            boxes[..., 3] -= pad[1]  # y padding
+    boxes[..., :4] /= gain
+    return clip_boxes(boxes, img0_shape)
 
-    # Create Precision-Recall curve and compute AP for each class
-    x, prec_values = np.linspace(0, 1, 1000), []
 
-    # Average precision, precision and recall curves
-    ap, p_curve, r_curve = np.zeros((nc, tp.shape[1])), np.zeros((nc, 1000)), np.zeros((nc, 1000))
-    for ci, c in enumerate(unique_classes):
-        i = pred_cls == c
-        n_l = nt[ci]  # number of labels
-        n_p = i.sum()  # number of predictions
-        if n_p == 0 or n_l == 0:
+def make_divisible(x: int, divisor):
+    """
+    Return the nearest number that is divisible by the given divisor.
+
+    Args:
+        x (int): The number to make divisible.
+        divisor (int | torch.Tensor): The divisor.
+
+    Returns:
+        (int): The nearest number divisible by the divisor.
+    """
+    if isinstance(divisor, torch.Tensor):
+        divisor = int(divisor.max())  # to int
+    return math.ceil(x / divisor) * divisor
+
+
+def nms_rotated(boxes, scores, threshold: float = 0.45, use_triu: bool = True):
+    """
+    Perform NMS on oriented bounding boxes using probiou and fast-nms.
+
+    Args:
+        boxes (torch.Tensor): Rotated bounding boxes with shape (N, 5) in xywhr format.
+        scores (torch.Tensor): Confidence scores with shape (N,).
+        threshold (float): IoU threshold for NMS.
+        use_triu (bool): Whether to use torch.triu operator for upper triangular matrix operations.
+
+    Returns:
+        (torch.Tensor): Indices of boxes to keep after NMS.
+    """
+    sorted_idx = torch.argsort(scores, descending=True)
+    boxes = boxes[sorted_idx]
+    ious = batch_probiou(boxes, boxes)
+    if use_triu:
+        ious = ious.triu_(diagonal=1)
+        # NOTE: handle the case when len(boxes) hence exportable by eliminating if-else condition
+        pick = torch.nonzero((ious >= threshold).sum(0) <= 0).squeeze_(-1)
+    else:
+        n = boxes.shape[0]
+        row_idx = torch.arange(n, device=boxes.device).view(-1, 1).expand(-1, n)
+        col_idx = torch.arange(n, device=boxes.device).view(1, -1).expand(n, -1)
+        upper_mask = row_idx < col_idx
+        ious = ious * upper_mask
+        # Zeroing these scores ensures the additional indices would not affect the final results
+        scores[~((ious >= threshold).sum(0) <= 0)] = 0
+        # NOTE: return indices with fixed length to avoid TFLite reshape error
+        pick = torch.topk(scores, scores.shape[0]).indices
+    return sorted_idx[pick]
+
+
+def non_max_suppression(
+    prediction,
+    conf_thres: float = 0.25,
+    iou_thres: float = 0.45,
+    classes=None,
+    agnostic: bool = False,
+    multi_label: bool = False,
+    labels=(),
+    max_det: int = 300,
+    nc: int = 0,  # number of classes (optional)
+    max_time_img: float = 0.05,
+    max_nms: int = 30000,
+    max_wh: int = 7680,
+    in_place: bool = True,
+    rotated: bool = False,
+    end2end: bool = False,
+    return_idxs: bool = False,
+):
+    """
+    Perform non-maximum suppression (NMS) on prediction results.
+
+    Applies NMS to filter overlapping bounding boxes based on confidence and IoU thresholds. Supports multiple
+    detection formats including standard boxes, rotated boxes, and masks.
+
+    Args:
+        prediction (torch.Tensor): Predictions with shape (batch_size, num_classes + 4 + num_masks, num_boxes)
+            containing boxes, classes, and optional masks.
+        conf_thres (float): Confidence threshold for filtering detections. Valid values are between 0.0 and 1.0.
+        iou_thres (float): IoU threshold for NMS filtering. Valid values are between 0.0 and 1.0.
+        classes (List[int], optional): List of class indices to consider. If None, all classes are considered.
+        agnostic (bool): Whether to perform class-agnostic NMS.
+        multi_label (bool): Whether each box can have multiple labels.
+        labels (List[List[Union[int, float, torch.Tensor]]]): A priori labels for each image.
+        max_det (int): Maximum number of detections to keep per image.
+        nc (int): Number of classes. Indices after this are considered masks.
+        max_time_img (float): Maximum time in seconds for processing one image.
+        max_nms (int): Maximum number of boxes for torchvision.ops.nms().
+        max_wh (int): Maximum box width and height in pixels.
+        in_place (bool): Whether to modify the input prediction tensor in place.
+        rotated (bool): Whether to handle Oriented Bounding Boxes (OBB).
+        end2end (bool): Whether the model is end-to-end and doesn't require NMS.
+        return_idxs (bool): Whether to return the indices of kept detections.
+
+    Returns:
+        output (List[torch.Tensor]): List of detections per image with shape (num_boxes, 6 + num_masks)
+            containing (x1, y1, x2, y2, confidence, class, mask1, mask2, ...).
+        keepi (List[torch.Tensor]): Indices of kept detections if return_idxs=True.
+    """
+    import torchvision  # scope for faster 'import ultralytics'
+
+    # Checks
+    assert 0 <= conf_thres <= 1, f"Invalid Confidence threshold {conf_thres}, valid values are between 0.0 and 1.0"
+    assert 0 <= iou_thres <= 1, f"Invalid IoU {iou_thres}, valid values are between 0.0 and 1.0"
+    if isinstance(prediction, (list, tuple)):  # YOLOv8 model in validation model, output = (inference_out, loss_out)
+        prediction = prediction[0]  # select only inference output
+    if classes is not None:
+        classes = torch.tensor(classes, device=prediction.device)
+
+    if prediction.shape[-1] == 6 or end2end:  # end-to-end model (BNC, i.e. 1,300,6)
+        output = [pred[pred[:, 4] > conf_thres][:max_det] for pred in prediction]
+        if classes is not None:
+            output = [pred[(pred[:, 5:6] == classes).any(1)] for pred in output]
+        return output
+
+    bs = prediction.shape[0]  # batch size (BCN, i.e. 1,84,6300)
+    nc = nc or (prediction.shape[1] - 4)  # number of classes
+    extra = prediction.shape[1] - nc - 4  # number of extra info
+    mi = 4 + nc  # mask start index
+    xc = prediction[:, 4:mi].amax(1) > conf_thres  # candidates
+    xinds = torch.stack([torch.arange(len(i), device=prediction.device) for i in xc])[..., None]  # to track idxs
+
+    # Settings
+    # min_wh = 2  # (pixels) minimum box width and height
+    time_limit = 2.0 + max_time_img * bs  # seconds to quit after
+    multi_label &= nc > 1  # multiple labels per box (adds 0.5ms/img)
+
+    prediction = prediction.transpose(-1, -2)  # shape(1,84,6300) to shape(1,6300,84)
+    if not rotated:
+        if in_place:
+            prediction[..., :4] = xywh2xyxy(prediction[..., :4])  # xywh to xyxy
+        else:
+            prediction = torch.cat((xywh2xyxy(prediction[..., :4]), prediction[..., 4:]), dim=-1)  # xywh to xyxy
+
+    t = time.time()
+    output = [torch.zeros((0, 6 + extra), device=prediction.device)] * bs
+    keepi = [torch.zeros((0, 1), device=prediction.device)] * bs  # to store the kept idxs
+    for xi, (x, xk) in enumerate(zip(prediction, xinds)):  # image index, (preds, preds indices)
+        # Apply constraints
+        # x[((x[:, 2:4] < min_wh) | (x[:, 2:4] > max_wh)).any(1), 4] = 0  # width-height
+        filt = xc[xi]  # confidence
+        x, xk = x[filt], xk[filt]
+
+        # Cat apriori labels if autolabelling
+        if labels and len(labels[xi]) and not rotated:
+            lb = labels[xi]
+            v = torch.zeros((len(lb), nc + extra + 4), device=x.device)
+            v[:, :4] = xywh2xyxy(lb[:, 1:5])  # box
+            v[range(len(lb)), lb[:, 0].long() + 4] = 1.0  # cls
+            x = torch.cat((x, v), 0)
+
+        # If none remain process next image
+        if not x.shape[0]:
             continue
 
-        # Accumulate FPs and TPs
-        fpc = (1 - tp[i]).cumsum(0)
-        tpc = tp[i].cumsum(0)
+        # Detections matrix nx6 (xyxy, conf, cls)
+        box, cls, mask = x.split((4, nc, extra), 1)
 
-        # Recall
-        recall = tpc / (n_l + eps)  # recall curve
-        r_curve[ci] = np.interp(-x, -conf[i], recall[:, 0], left=0)  # negative x, xp because xp decreases
+        if multi_label:
+            i, j = torch.where(cls > conf_thres)
+            x = torch.cat((box[i], x[i, 4 + j, None], j[:, None].float(), mask[i]), 1)
+            xk = xk[i]
+        else:  # best class only
+            conf, j = cls.max(1, keepdim=True)
+            filt = conf.view(-1) > conf_thres
+            x = torch.cat((box, conf, j.float(), mask), 1)[filt]
+            xk = xk[filt]
 
-        # Precision
-        precision = tpc / (tpc + fpc)  # precision curve
-        p_curve[ci] = np.interp(-x, -conf[i], precision[:, 0], left=1)  # p at pr_score
+        # Filter by class
+        if classes is not None:
+            filt = (x[:, 5:6] == classes).any(1)
+            x, xk = x[filt], xk[filt]
 
-        # AP from recall-precision curve
-        for j in range(tp.shape[1]):
-            ap[ci, j], mpre, mrec = compute_ap(recall[:, j], precision[:, j])
-            if j == 0:
-                prec_values.append(np.interp(x, mrec, mpre))  # precision at mAP@0.5
+        # Check shape
+        n = x.shape[0]  # number of boxes
+        if not n:  # no boxes
+            continue
+        if n > max_nms:  # excess boxes
+            filt = x[:, 4].argsort(descending=True)[:max_nms]  # sort by confidence and remove excess boxes
+            x, xk = x[filt], xk[filt]
 
-    prec_values = np.array(prec_values) if prec_values else np.zeros((1, 1000))  # (nc, 1000)
+        # Batched NMS
+        c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes
+        scores = x[:, 4]  # scores
+        if rotated:
+            boxes = torch.cat((x[:, :2] + c, x[:, 2:4], x[:, -1:]), dim=-1)  # xywhr
+            i = nms_rotated(boxes, scores, iou_thres)
+        else:
+            boxes = x[:, :4] + c  # boxes (offset by class)
+            i = torchvision.ops.nms(boxes, scores, iou_thres)  # NMS
+        i = i[:max_det]  # limit detections
 
-    # Compute F1 (harmonic mean of precision and recall)
-    f1_curve = 2 * p_curve * r_curve / (p_curve + r_curve + eps)
-    names = {i: names[k] for i, k in enumerate(unique_classes) if k in names}  # dict: only classes that have data
-    if plot:
-        plot_pr_curve(x, prec_values, ap, save_dir / f"{prefix}PR_curve.png", names, on_plot=on_plot)
-        plot_mc_curve(x, f1_curve, save_dir / f"{prefix}F1_curve.png", names, ylabel="F1", on_plot=on_plot)
-        plot_mc_curve(x, p_curve, save_dir / f"{prefix}P_curve.png", names, ylabel="Precision", on_plot=on_plot)
-        plot_mc_curve(x, r_curve, save_dir / f"{prefix}R_curve.png", names, ylabel="Recall", on_plot=on_plot)
+        output[xi], keepi[xi] = x[i], xk[i].reshape(-1)
+        if (time.time() - t) > time_limit:
+            print(f"Warning: NMS time limit {time_limit:.3f}s exceeded")
+            break  # time limit exceeded
 
-    i = smooth(f1_curve.mean(0), 0.1).argmax()  # max F1 index
-    p, r, f1 = p_curve[:, i], r_curve[:, i], f1_curve[:, i]  # max-F1 precision, recall, F1 values
-    tp = (r * nt).round()  # true positives
-    fp = (tp / (p + eps) - tp).round()  # false positives
-    return tp, fp, p, r, f1, ap, unique_classes.astype(int), p_curve, r_curve, f1_curve, x, prec_values
+    return (output, keepi) if return_idxs else output
 
 
-class Metric(SimpleClass):
+def clip_boxes(boxes, shape):
     """
-    Class for computing evaluation metrics for Ultralytics YOLO models.
+    Clip bounding boxes to image boundaries.
 
-    Attributes:
-        p (list): Precision for each class. Shape: (nc,).
-        r (list): Recall for each class. Shape: (nc,).
-        f1 (list): F1 score for each class. Shape: (nc,).
-        all_ap (list): AP scores for all classes and all IoU thresholds. Shape: (nc, 10).
-        ap_class_index (list): Index of class for each AP score. Shape: (nc,).
-        nc (int): Number of classes.
+    Args:
+        boxes (torch.Tensor | numpy.ndarray): Bounding boxes to clip.
+        shape (tuple): Image shape as (height, width).
 
-    Methods:
-        ap50(): AP at IoU threshold of 0.5 for all classes. Returns: List of AP scores. Shape: (nc,) or [].
-        ap(): AP at IoU thresholds from 0.5 to 0.95 for all classes. Returns: List of AP scores. Shape: (nc,) or [].
-        mp(): Mean precision of all classes. Returns: Float.
-        mr(): Mean recall of all classes. Returns: Float.
-        map50(): Mean AP at IoU threshold of 0.5 for all classes. Returns: Float.
-        map75(): Mean AP at IoU threshold of 0.75 for all classes. Returns: Float.
-        map(): Mean AP at IoU thresholds from 0.5 to 0.95 for all classes. Returns: Float.
-        mean_results(): Mean of results, returns mp, mr, map50, map.
-        class_result(i): Class-aware result, returns p[i], r[i], ap50[i], ap[i].
-        maps(): mAP of each class. Returns: Array of mAP scores, shape: (nc,).
-        fitness(): Model fitness as a weighted combination of metrics. Returns: Float.
-        update(results): Update metric attributes with new evaluation results.
+    Returns:
+        (torch.Tensor | numpy.ndarray): Clipped bounding boxes.
     """
-
-    def __init__(self) -> None:
-        """Initialize a Metric instance for computing evaluation metrics for the YOLOv8 model."""
-        self.p = []  # (nc, )
-        self.r = []  # (nc, )
-        self.f1 = []  # (nc, )
-        self.all_ap = []  # (nc, 10)
-        self.ap_class_index = []  # (nc, )
-        self.nc = 0
-
-    @property
-    def ap50(self) -> Union[np.ndarray, List]:
-        """
-        Return the Average Precision (AP) at an IoU threshold of 0.5 for all classes.
-
-        Returns:
-            (np.ndarray | list): Array of shape (nc,) with AP50 values per class, or an empty list if not available.
-        """
-        return self.all_ap[:, 0] if len(self.all_ap) else []
-
-    @property
-    def ap(self) -> Union[np.ndarray, List]:
-        """
-        Return the Average Precision (AP) at an IoU threshold of 0.5-0.95 for all classes.
-
-        Returns:
-            (np.ndarray | list): Array of shape (nc,) with AP50-95 values per class, or an empty list if not available.
-        """
-        return self.all_ap.mean(1) if len(self.all_ap) else []
-
-    @property
-    def mp(self) -> float:
-        """
-        Return the Mean Precision of all classes.
-
-        Returns:
-            (float): The mean precision of all classes.
-        """
-        return self.p.mean() if len(self.p) else 0.0
-
-    @property
-    def mr(self) -> float:
-        """
-        Return the Mean Recall of all classes.
-
-        Returns:
-            (float): The mean recall of all classes.
-        """
-        return self.r.mean() if len(self.r) else 0.0
-
-    @property
-    def map50(self) -> float:
-        """
-        Return the mean Average Precision (mAP) at an IoU threshold of 0.5.
-
-        Returns:
-            (float): The mAP at an IoU threshold of 0.5.
-        """
-        return self.all_ap[:, 0].mean() if len(self.all_ap) else 0.0
-
-    @property
-    def map75(self) -> float:
-        """
-        Return the mean Average Precision (mAP) at an IoU threshold of 0.75.
-
-        Returns:
-            (float): The mAP at an IoU threshold of 0.75.
-        """
-        return self.all_ap[:, 5].mean() if len(self.all_ap) else 0.0
-
-    @property
-    def map(self) -> float:
-        """
-        Return the mean Average Precision (mAP) over IoU thresholds of 0.5 - 0.95 in steps of 0.05.
-
-        Returns:
-            (float): The mAP over IoU thresholds of 0.5 - 0.95 in steps of 0.05.
-        """
-        return self.all_ap.mean() if len(self.all_ap) else 0.0
-
-    def mean_results(self) -> List[float]:
-        """Return mean of results, mp, mr, map50, map."""
-        return [self.mp, self.mr, self.map50, self.map]
-
-    def class_result(self, i: int) -> Tuple[float, float, float, float]:
-        """Return class-aware result, p[i], r[i], ap50[i], ap[i]."""
-        return self.p[i], self.r[i], self.ap50[i], self.ap[i]
-
-    @property
-    def maps(self) -> np.ndarray:
-        """Return mAP of each class."""
-        maps = np.zeros(self.nc) + self.map
-        for i, c in enumerate(self.ap_class_index):
-            maps[c] = self.ap[i]
-        return maps
-
-    def fitness(self) -> float:
-        """Return model fitness as a weighted combination of metrics."""
-        w = [0.0, 0.0, 0.1, 0.9]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
-        return (np.nan_to_num(np.array(self.mean_results())) * w).sum()
-
-    def update(self, results: tuple):
-        """
-        Update the evaluation metrics with a new set of results.
-
-        Args:
-            results (tuple): A tuple containing evaluation metrics:
-                - p (list): Precision for each class.
-                - r (list): Recall for each class.
-                - f1 (list): F1 score for each class.
-                - all_ap (list): AP scores for all classes and all IoU thresholds.
-                - ap_class_index (list): Index of class for each AP score.
-                - p_curve (list): Precision curve for each class.
-                - r_curve (list): Recall curve for each class.
-                - f1_curve (list): F1 curve for each class.
-                - px (list): X values for the curves.
-                - prec_values (list): Precision values for each class.
-        """
-        (
-            self.p,
-            self.r,
-            self.f1,
-            self.all_ap,
-            self.ap_class_index,
-            self.p_curve,
-            self.r_curve,
-            self.f1_curve,
-            self.px,
-            self.prec_values,
-        ) = results
-
-    @property
-    def curves(self) -> List:
-        """Return a list of curves for accessing specific metrics curves."""
-        return []
-
-    @property
-    def curves_results(self) -> List[List]:
-        """Return a list of curves for accessing specific metrics curves."""
-        return [
-            [self.px, self.prec_values, "Recall", "Precision"],
-            [self.px, self.f1_curve, "Confidence", "F1"],
-            [self.px, self.p_curve, "Confidence", "Precision"],
-            [self.px, self.r_curve, "Confidence", "Recall"],
-        ]
+    if isinstance(boxes, torch.Tensor):  # faster individually (WARNING: inplace .clamp_() Apple MPS bug)
+        boxes[..., 0] = boxes[..., 0].clamp(0, shape[1])  # x1
+        boxes[..., 1] = boxes[..., 1].clamp(0, shape[0])  # y1
+        boxes[..., 2] = boxes[..., 2].clamp(0, shape[1])  # x2
+        boxes[..., 3] = boxes[..., 3].clamp(0, shape[0])  # y2
+    else:  # np.array (faster grouped)
+        boxes[..., [0, 2]] = boxes[..., [0, 2]].clip(0, shape[1])  # x1, x2
+        boxes[..., [1, 3]] = boxes[..., [1, 3]].clip(0, shape[0])  # y1, y2
+    return boxes
 
 
-class DetMetrics(SimpleClass, DataExportMixin):
+def clip_coords(coords, shape):
     """
-    Utility class for computing detection metrics such as precision, recall, and mean average precision (mAP).
+    Clip line coordinates to image boundaries.
 
-    Attributes:
-        names (Dict[int, str]): A dictionary of class names.
-        box (Metric): An instance of the Metric class for storing detection results.
-        speed (Dict[str, float]): A dictionary for storing execution times of different parts of the detection process.
-        task (str): The task type, set to 'detect'.
-        stats (Dict[str, List]): A dictionary containing lists for true positives, confidence scores, predicted classes, target classes, and target images.
-        nt_per_class: Number of targets per class.
-        nt_per_image: Number of targets per image.
+    Args:
+        coords (torch.Tensor | numpy.ndarray): Line coordinates to clip.
+        shape (tuple): Image shape as (height, width).
+
+    Returns:
+        (torch.Tensor | numpy.ndarray): Clipped coordinates.
     """
-
-    def __init__(self, names: Dict[int, str] = {}) -> None:
-        """
-        Initialize a DetMetrics instance with a save directory, plot flag, and class names.
-
-        Args:
-            names (Dict[int, str], optional): Dictionary of class names.
-        """
-        self.names = names
-        self.box = Metric()
-        self.speed = {"preprocess": 0.0, "inference": 0.0, "loss": 0.0, "postprocess": 0.0}
-        self.task = "detect"
-        self.stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
-        self.nt_per_class = None
-        self.nt_per_image = None
-
-    def update_stats(self, stat: Dict[str, Any]) -> None:
-        """
-        Update statistics by appending new values to existing stat collections.
-
-        Args:
-            stat (Dict[str, any]): Dictionary containing new statistical values to append.
-                         Keys should match existing keys in self.stats.
-        """
-        for k in self.stats.keys():
-            self.stats[k].append(stat[k])
-
-    def process(self, save_dir: Path = Path("."), plot: bool = False, on_plot=None) -> Dict[str, np.ndarray]:
-        """
-        Process predicted results for object detection and update metrics.
-
-        Args:
-            save_dir (Path): Directory to save plots. Defaults to Path(".").
-            plot (bool): Whether to plot precision-recall curves. Defaults to False.
-            on_plot (callable, optional): Function to call after plots are generated. Defaults to None.
-
-        Returns:
-            (Dict[str, np.ndarray]): Dictionary containing concatenated statistics arrays.
-        """
-        stats = {k: np.concatenate(v, 0) for k, v in self.stats.items()}  # to numpy
-        if len(stats) == 0:
-            return stats
-        results = ap_per_class(
-            stats["tp"],
-            stats["conf"],
-            stats["pred_cls"],
-            stats["target_cls"],
-            plot=plot,
-            save_dir=save_dir,
-            names=self.names,
-            on_plot=on_plot,
-        )[2:]
-        self.box.nc = len(self.names)
-        self.box.update(results)
-        self.nt_per_class = np.bincount(stats["target_cls"].astype(int), minlength=len(self.names))
-        self.nt_per_image = np.bincount(stats["target_img"].astype(int), minlength=len(self.names))
-        return stats
-
-    def clear_stats(self):
-        """Clear the stored statistics."""
-        for v in self.stats.values():
-            v.clear()
-
-    @property
-    def keys(self) -> List[str]:
-        """Return a list of keys for accessing specific metrics."""
-        return ["metrics/precision(B)", "metrics/recall(B)", "metrics/mAP50(B)", "metrics/mAP50-95(B)"]
-
-    def mean_results(self) -> List[float]:
-        """Calculate mean of detected objects & return precision, recall, mAP50, and mAP50-95."""
-        return self.box.mean_results()
-
-    def class_result(self, i: int) -> Tuple[float, float, float, float]:
-        """Return the result of evaluating the performance of an object detection model on a specific class."""
-        return self.box.class_result(i)
-
-    @property
-    def maps(self) -> np.ndarray:
-        """Return mean Average Precision (mAP) scores per class."""
-        return self.box.maps
-
-    @property
-    def fitness(self) -> float:
-        """Return the fitness of box object."""
-        return self.box.fitness()
-
-    @property
-    def ap_class_index(self) -> List:
-        """Return the average precision index per class."""
-        return self.box.ap_class_index
-
-    @property
-    def results_dict(self) -> Dict[str, float]:
-        """Return dictionary of computed performance metrics and statistics."""
-        return dict(zip(self.keys + ["fitness"], self.mean_results() + [self.fitness]))
-
-    @property
-    def curves(self) -> List[str]:
-        """Return a list of curves for accessing specific metrics curves."""
-        return ["Precision-Recall(B)", "F1-Confidence(B)", "Precision-Confidence(B)", "Recall-Confidence(B)"]
-
-    @property
-    def curves_results(self) -> List[List]:
-        """Return dictionary of computed performance metrics and statistics."""
-        return self.box.curves_results
-
-    def summary(self, normalize: bool = True, decimals: int = 5) -> List[Dict[str, Any]]:
-        """
-        Generate a summarized representation of per-class detection metrics as a list of dictionaries. Includes shared
-        scalar metrics (mAP, mAP50, mAP75) alongside precision, recall, and F1-score for each class.
-
-        Args:
-           normalize (bool): For Detect metrics, everything is normalized  by default [0-1].
-           decimals (int): Number of decimal places to round the metrics values to.
-
-        Returns:
-           (List[Dict[str, Any]]): A list of dictionaries, each representing one class with corresponding metric values.
-
-        Examples:
-           >>> results = model.val(data="coco8.yaml")
-           >>> detection_summary = results.summary()
-           >>> print(detection_summary)
-        """
-        per_class = {
-            "Box-P": self.box.p,
-            "Box-R": self.box.r,
-            "Box-F1": self.box.f1,
-        }
-        return [
-            {
-                "Class": self.names[self.ap_class_index[i]],
-                "Images": self.nt_per_image[self.ap_class_index[i]],
-                "Instances": self.nt_per_class[self.ap_class_index[i]],
-                **{k: round(v[i], decimals) for k, v in per_class.items()},
-                "mAP50": round(self.class_result(i)[2], decimals),
-                "mAP50-95": round(self.class_result(i)[3], decimals),
-            }
-            for i in range(len(per_class["Box-P"]))
-        ]
+    if isinstance(coords, torch.Tensor):  # faster individually (WARNING: inplace .clamp_() Apple MPS bug)
+        coords[..., 0] = coords[..., 0].clamp(0, shape[1])  # x
+        coords[..., 1] = coords[..., 1].clamp(0, shape[0])  # y
+    else:  # np.array (faster grouped)
+        coords[..., 0] = coords[..., 0].clip(0, shape[1])  # x
+        coords[..., 1] = coords[..., 1].clip(0, shape[0])  # y
+    return coords
 
 
-class SegmentMetrics(DetMetrics):
+def scale_image(masks, im0_shape, ratio_pad=None):
     """
-    Calculate and aggregate detection and segmentation metrics over a given set of classes.
+    Rescale masks to original image size.
 
-    Attributes:
-        names (Dict[int, str]): Dictionary of class names.
-        box (Metric): An instance of the Metric class for storing detection results.
-        seg (Metric): An instance of the Metric class to calculate mask segmentation metrics.
-        speed (Dict[str, float]): A dictionary for storing execution times of different parts of the detection process.
-        task (str): The task type, set to 'segment'.
-        stats (Dict[str, List]): A dictionary containing lists for true positives, confidence scores, predicted classes, target classes, and target images.
-        nt_per_class: Number of targets per class.
-        nt_per_image: Number of targets per image.
+    Takes resized and padded masks and rescales them back to the original image dimensions, removing any padding
+    that was applied during preprocessing.
+
+    Args:
+        masks (np.ndarray): Resized and padded masks with shape [H, W, N] or [H, W, 3].
+        im0_shape (tuple): Original image shape as (height, width).
+        ratio_pad (tuple, optional): Ratio and padding values as ((ratio_h, ratio_w), (pad_h, pad_w)).
+
+    Returns:
+        (np.ndarray): Rescaled masks with shape [H, W, N] matching original image dimensions.
     """
+    # Rescale coordinates (xyxy) from im1_shape to im0_shape
+    im1_shape = masks.shape
+    if im1_shape[:2] == im0_shape[:2]:
+        return masks
+    if ratio_pad is None:  # calculate from im0_shape
+        gain = min(im1_shape[0] / im0_shape[0], im1_shape[1] / im0_shape[1])  # gain  = old / new
+        pad = (im1_shape[1] - im0_shape[1] * gain) / 2, (im1_shape[0] - im0_shape[0] * gain) / 2  # wh padding
+    else:
+        pad = ratio_pad[1]
 
-    def __init__(self, names: Dict[int, str] = {}) -> None:
-        """
-        Initialize a SegmentMetrics instance with a save directory, plot flag, and class names.
+    top, left = (int(round(pad[1] - 0.1)), int(round(pad[0] - 0.1)))
+    bottom, right = (
+        im1_shape[0] - int(round(pad[1] + 0.1)),
+        im1_shape[1] - int(round(pad[0] + 0.1)),
+    )
 
-        Args:
-            names (Dict[int, str], optional): Dictionary of class names.
-        """
-        DetMetrics.__init__(self, names)
-        self.seg = Metric()
-        self.task = "segment"
-        self.stats["tp_m"] = []  # add additional stats for masks
+    if len(masks.shape) < 2:
+        raise ValueError(f'"len of masks shape" should be 2 or 3, but got {len(masks.shape)}')
+    masks = masks[top:bottom, left:right]
+    masks = cv2.resize(masks, (im0_shape[1], im0_shape[0]))
+    if len(masks.shape) == 2:
+        masks = masks[:, :, None]
 
-    def process(self, save_dir: Path = Path("."), plot: bool = False, on_plot=None) -> Dict[str, np.ndarray]:
-        """
-        Process the detection and segmentation metrics over the given set of predictions.
-
-        Args:
-            save_dir (Path): Directory to save plots. Defaults to Path(".").
-            plot (bool): Whether to plot precision-recall curves. Defaults to False.
-            on_plot (callable, optional): Function to call after plots are generated. Defaults to None.
-
-        Returns:
-            (Dict[str, np.ndarray]): Dictionary containing concatenated statistics arrays.
-        """
-        stats = DetMetrics.process(self, on_plot=on_plot)  # process box stats
-        results_mask = ap_per_class(
-            stats["tp_m"],
-            stats["conf"],
-            stats["pred_cls"],
-            stats["target_cls"],
-            plot=plot,
-            on_plot=on_plot,
-            save_dir=save_dir,
-            names=self.names,
-            prefix="Mask",
-        )[2:]
-        self.seg.nc = len(self.names)
-        self.seg.update(results_mask)
-        return stats
-
-    @property
-    def keys(self) -> List[str]:
-        """Return a list of keys for accessing metrics."""
-        return DetMetrics.keys.fget(self) + [
-            "metrics/precision(M)",
-            "metrics/recall(M)",
-            "metrics/mAP50(M)",
-            "metrics/mAP50-95(M)",
-        ]
-
-    def mean_results(self) -> List[float]:
-        """Return the mean metrics for bounding box and segmentation results."""
-        return DetMetrics.mean_results(self) + self.seg.mean_results()
-
-    def class_result(self, i: int) -> List[float]:
-        """Return classification results for a specified class index."""
-        return DetMetrics.class_result(self, i) + self.seg.class_result(i)
-
-    @property
-    def maps(self) -> np.ndarray:
-        """Return mAP scores for object detection and semantic segmentation models."""
-        return DetMetrics.maps.fget(self) + self.seg.maps
-
-    @property
-    def fitness(self) -> float:
-        """Return the fitness score for both segmentation and bounding box models."""
-        return self.seg.fitness() + DetMetrics.fitness.fget(self)
-
-    @property
-    def curves(self) -> List[str]:
-        """Return a list of curves for accessing specific metrics curves."""
-        return DetMetrics.curves.fget(self) + [
-            "Precision-Recall(M)",
-            "F1-Confidence(M)",
-            "Precision-Confidence(M)",
-            "Recall-Confidence(M)",
-        ]
-
-    @property
-    def curves_results(self) -> List[List]:
-        """Return dictionary of computed performance metrics and statistics."""
-        return DetMetrics.curves_results.fget(self) + self.seg.curves_results
-
-    def summary(self, normalize: bool = True, decimals: int = 5) -> List[Dict[str, Any]]:
-        """
-        Generate a summarized representation of per-class segmentation metrics as a list of dictionaries. Includes both
-        box and mask scalar metrics (mAP, mAP50, mAP75) alongside precision, recall, and F1-score for each class.
-
-        Args:
-            normalize (bool): For Segment metrics, everything is normalized  by default [0-1].
-            decimals (int): Number of decimal places to round the metrics values to.
-
-        Returns:
-            (List[Dict[str, Any]]): A list of dictionaries, each representing one class with corresponding metric values.
-
-        Examples:
-            >>> results = model.val(data="coco8-seg.yaml")
-            >>> seg_summary = results.summary(decimals=4)
-            >>> print(seg_summary)
-        """
-        per_class = {
-            "Mask-P": self.seg.p,
-            "Mask-R": self.seg.r,
-            "Mask-F1": self.seg.f1,
-        }
-        summary = DetMetrics.summary(self, normalize, decimals)  # get box summary
-        for i, s in enumerate(summary):
-            s.update({**{k: round(v[i], decimals) for k, v in per_class.items()}})
-        return summary
+    return masks
 
 
-class PoseMetrics(DetMetrics):
+def xyxy2xywh(x):
     """
-    Calculate and aggregate detection and pose metrics over a given set of classes.
+    Convert bounding box coordinates from (x1, y1, x2, y2) format to (x, y, width, height) format where (x1, y1) is the
+    top-left corner and (x2, y2) is the bottom-right corner.
 
-    Attributes:
-        names (Dict[int, str]): Dictionary of class names.
-        pose (Metric): An instance of the Metric class to calculate pose metrics.
-        box (Metric): An instance of the Metric class for storing detection results.
-        speed (Dict[str, float]): A dictionary for storing execution times of different parts of the detection process.
-        task (str): The task type, set to 'pose'.
-        stats (Dict[str, List]): A dictionary containing lists for true positives, confidence scores, predicted classes, target classes, and target images.
-        nt_per_class: Number of targets per class.
-        nt_per_image: Number of targets per image.
+    Args:
+        x (np.ndarray | torch.Tensor): Input bounding box coordinates in (x1, y1, x2, y2) format.
 
-    Methods:
-        process(tp_m, tp_b, conf, pred_cls, target_cls): Process metrics over the given set of predictions.
-        mean_results(): Return the mean of the detection and segmentation metrics over all the classes.
-        class_result(i): Return the detection and segmentation metrics of class `i`.
-        maps: Return the mean Average Precision (mAP) scores for IoU thresholds ranging from 0.50 to 0.95.
-        fitness: Return the fitness scores, which are a single weighted combination of metrics.
-        ap_class_index: Return the list of indices of classes used to compute Average Precision (AP).
-        results_dict: Return the dictionary containing all the detection and segmentation metrics and fitness score.
+    Returns:
+        (np.ndarray | torch.Tensor): Bounding box coordinates in (x, y, width, height) format.
     """
-
-    def __init__(self, names: Dict[int, str] = {}) -> None:
-        """
-        Initialize the PoseMetrics class with directory path, class names, and plotting options.
-
-        Args:
-            names (Dict[int, str], optional): Dictionary of class names.
-        """
-        super().__init__(names)
-        self.pose = Metric()
-        self.task = "pose"
-        self.stats["tp_p"] = []  # add additional stats for pose
-
-    def process(self, save_dir: Path = Path("."), plot: bool = False, on_plot=None) -> Dict[str, np.ndarray]:
-        """
-        Process the detection and pose metrics over the given set of predictions.
-
-        Args:
-            save_dir (Path): Directory to save plots. Defaults to Path(".").
-            plot (bool): Whether to plot precision-recall curves. Defaults to False.
-            on_plot (callable, optional): Function to call after plots are generated.
-
-        Returns:
-            (Dict[str, np.ndarray]): Dictionary containing concatenated statistics arrays.
-        """
-        stats = DetMetrics.process(self, on_plot=on_plot)  # process box stats
-        results_pose = ap_per_class(
-            stats["tp_p"],
-            stats["conf"],
-            stats["pred_cls"],
-            stats["target_cls"],
-            plot=plot,
-            on_plot=on_plot,
-            save_dir=save_dir,
-            names=self.names,
-            prefix="Pose",
-        )[2:]
-        self.pose.nc = len(self.names)
-        self.pose.update(results_pose)
-        return stats
-
-    @property
-    def keys(self) -> List[str]:
-        """Return list of evaluation metric keys."""
-        return DetMetrics.keys.fget(self) + [
-            "metrics/precision(P)",
-            "metrics/recall(P)",
-            "metrics/mAP50(P)",
-            "metrics/mAP50-95(P)",
-        ]
-
-    def mean_results(self) -> List[float]:
-        """Return the mean results of box and pose."""
-        return DetMetrics.mean_results(self) + self.pose.mean_results()
-
-    def class_result(self, i: int) -> List[float]:
-        """Return the class-wise detection results for a specific class i."""
-        return DetMetrics.class_result(self, i) + self.pose.class_result(i)
-
-    @property
-    def maps(self) -> np.ndarray:
-        """Return the mean average precision (mAP) per class for both box and pose detections."""
-        return DetMetrics.maps.fget(self) + self.pose.maps
-
-    @property
-    def fitness(self) -> float:
-        """Return combined fitness score for pose and box detection."""
-        return self.pose.fitness() + DetMetrics.fitness.fget(self)
-
-    @property
-    def curves(self) -> List[str]:
-        """Return a list of curves for accessing specific metrics curves."""
-        return DetMetrics.curves.fget(self) + [
-            "Precision-Recall(B)",
-            "F1-Confidence(B)",
-            "Precision-Confidence(B)",
-            "Recall-Confidence(B)",
-            "Precision-Recall(P)",
-            "F1-Confidence(P)",
-            "Precision-Confidence(P)",
-            "Recall-Confidence(P)",
-        ]
-
-    @property
-    def curves_results(self) -> List[List]:
-        """Return dictionary of computed performance metrics and statistics."""
-        return DetMetrics.curves_results.fget(self) + self.pose.curves_results
-
-    def summary(self, normalize: bool = True, decimals: int = 5) -> List[Dict[str, Any]]:
-        """
-        Generate a summarized representation of per-class pose metrics as a list of dictionaries. Includes both box and
-        pose scalar metrics (mAP, mAP50, mAP75) alongside precision, recall, and F1-score for each class.
-
-        Args:
-            normalize (bool): For Pose metrics, everything is normalized  by default [0-1].
-            decimals (int): Number of decimal places to round the metrics values to.
-
-        Returns:
-            (List[Dict[str, Any]]): A list of dictionaries, each representing one class with corresponding metric values.
-
-        Examples:
-            >>> results = model.val(data="coco8-pose.yaml")
-            >>> pose_summary = results.summary(decimals=4)
-            >>> print(pose_summary)
-        """
-        per_class = {
-            "Pose-P": self.pose.p,
-            "Pose-R": self.pose.r,
-            "Pose-F1": self.pose.f1,
-        }
-        summary = DetMetrics.summary(self, normalize, decimals)  # get box summary
-        for i, s in enumerate(summary):
-            s.update({**{k: round(v[i], decimals) for k, v in per_class.items()}})
-        return summary
+    assert x.shape[-1] == 4, f"input shape last dimension expected 4 but input shape is {x.shape}"
+    y = empty_like(x)  # faster than clone/copy
+    y[..., 0] = (x[..., 0] + x[..., 2]) / 2  # x center
+    y[..., 1] = (x[..., 1] + x[..., 3]) / 2  # y center
+    y[..., 2] = x[..., 2] - x[..., 0]  # width
+    y[..., 3] = x[..., 3] - x[..., 1]  # height
+    return y
 
 
-class ClassifyMetrics(SimpleClass, DataExportMixin):
+def xywh2xyxy(x):
     """
-    Class for computing classification metrics including top-1 and top-5 accuracy.
+    Convert bounding box coordinates from (x, y, width, height) format to (x1, y1, x2, y2) format where (x1, y1) is the
+    top-left corner and (x2, y2) is the bottom-right corner. Note: ops per 2 channels faster than per channel.
 
-    Attributes:
-        top1 (float): The top-1 accuracy.
-        top5 (float): The top-5 accuracy.
-        speed (dict): A dictionary containing the time taken for each step in the pipeline.
-        task (str): The task type, set to 'classify'.
+    Args:
+        x (np.ndarray | torch.Tensor): Input bounding box coordinates in (x, y, width, height) format.
+
+    Returns:
+        (np.ndarray | torch.Tensor): Bounding box coordinates in (x1, y1, x2, y2) format.
     """
-
-    def __init__(self) -> None:
-        """Initialize a ClassifyMetrics instance."""
-        self.top1 = 0
-        self.top5 = 0
-        self.speed = {"preprocess": 0.0, "inference": 0.0, "loss": 0.0, "postprocess": 0.0}
-        self.task = "classify"
-
-    def process(self, targets: torch.Tensor, pred: torch.Tensor):
-        """
-        Process target classes and predicted classes to compute metrics.
-
-        Args:
-            targets (torch.Tensor): Target classes.
-            pred (torch.Tensor): Predicted classes.
-        """
-        pred, targets = torch.cat(pred), torch.cat(targets)
-        correct = (targets[:, None] == pred).float()
-        acc = torch.stack((correct[:, 0], correct.max(1).values), dim=1)  # (top1, top5) accuracy
-        self.top1, self.top5 = acc.mean(0).tolist()
-
-    @property
-    def fitness(self) -> float:
-        """Return mean of top-1 and top-5 accuracies as fitness score."""
-        return (self.top1 + self.top5) / 2
-
-    @property
-    def results_dict(self) -> Dict[str, float]:
-        """Return a dictionary with model's performance metrics and fitness score."""
-        return dict(zip(self.keys + ["fitness"], [self.top1, self.top5, self.fitness]))
-
-    @property
-    def keys(self) -> List[str]:
-        """Return a list of keys for the results_dict property."""
-        return ["metrics/accuracy_top1", "metrics/accuracy_top5"]
-
-    @property
-    def curves(self) -> List:
-        """Return a list of curves for accessing specific metrics curves."""
-        return []
-
-    @property
-    def curves_results(self) -> List:
-        """Return a list of curves for accessing specific metrics curves."""
-        return []
-
-    def summary(self, normalize: bool = True, decimals: int = 5) -> List[Dict[str, float]]:
-        """
-        Generate a single-row summary of classification metrics (Top-1 and Top-5 accuracy).
-
-        Args:
-            normalize (bool): For Classify metrics, everything is normalized  by default [0-1].
-            decimals (int): Number of decimal places to round the metrics values to.
-
-        Returns:
-            (List[Dict[str, float]]): A list with one dictionary containing Top-1 and Top-5 classification accuracy.
-
-        Examples:
-            >>> results = model.val(data="imagenet10")
-            >>> classify_summary = results.summary(decimals=4)
-            >>> print(classify_summary)
-        """
-        return [{"top1_acc": round(self.top1, decimals), "top5_acc": round(self.top5, decimals)}]
+    assert x.shape[-1] == 4, f"input shape last dimension expected 4 but input shape is {x.shape}"
+    y = empty_like(x)  # faster than clone/copy
+    xy = x[..., :2]  # centers
+    wh = x[..., 2:] / 2  # half width-height
+    y[..., :2] = xy - wh  # top left xy
+    y[..., 2:] = xy + wh  # bottom right xy
+    return y
 
 
-class OBBMetrics(DetMetrics):
+def xywhn2xyxy(x, w: int = 640, h: int = 640, padw: int = 0, padh: int = 0):
     """
-    Metrics for evaluating oriented bounding box (OBB) detection.
+    Convert normalized bounding box coordinates to pixel coordinates.
 
-    Attributes:
-        names (Dict[int, str]): Dictionary of class names.
-        box (Metric): An instance of the Metric class for storing detection results.
-        speed (Dict[str, float]): A dictionary for storing execution times of different parts of the detection process.
-        task (str): The task type, set to 'obb'.
-        stats (Dict[str, List]): A dictionary containing lists for true positives, confidence scores, predicted classes, target classes, and target images.
-        nt_per_class: Number of targets per class.
-        nt_per_image: Number of targets per image.
+    Args:
+        x (np.ndarray | torch.Tensor): Normalized bounding box coordinates in (x, y, w, h) format.
+        w (int): Image width in pixels.
+        h (int): Image height in pixels.
+        padw (int): Padding width in pixels.
+        padh (int): Padding height in pixels.
 
-    References:
-        https://arxiv.org/pdf/2106.06072.pdf
+    Returns:
+        y (np.ndarray | torch.Tensor): The coordinates of the bounding box in the format [x1, y1, x2, y2] where
+            x1,y1 is the top-left corner, x2,y2 is the bottom-right corner of the bounding box.
     """
+    assert x.shape[-1] == 4, f"input shape last dimension expected 4 but input shape is {x.shape}"
+    y = empty_like(x)  # faster than clone/copy
+    y[..., 0] = w * (x[..., 0] - x[..., 2] / 2) + padw  # top left x
+    y[..., 1] = h * (x[..., 1] - x[..., 3] / 2) + padh  # top left y
+    y[..., 2] = w * (x[..., 0] + x[..., 2] / 2) + padw  # bottom right x
+    y[..., 3] = h * (x[..., 1] + x[..., 3] / 2) + padh  # bottom right y
+    return y
 
-    def __init__(self, names: Dict[int, str] = {}) -> None:
-        """
-        Initialize an OBBMetrics instance with directory, plotting, and class names.
 
-        Args:
-            names (Dict[int, str], optional): Dictionary of class names.
-        """
-        DetMetrics.__init__(self, names)
-        # TODO: probably remove task as well
-        self.task = "obb"
+def xyxy2xywhn(x, w: int = 640, h: int = 640, clip: bool = False, eps: float = 0.0):
+    """
+    Convert bounding box coordinates from (x1, y1, x2, y2) format to (x, y, width, height, normalized) format. x, y,
+    width and height are normalized to image dimensions.
+
+    Args:
+        x (np.ndarray | torch.Tensor): Input bounding box coordinates in (x1, y1, x2, y2) format.
+        w (int): Image width in pixels.
+        h (int): Image height in pixels.
+        clip (bool): Whether to clip boxes to image boundaries.
+        eps (float): Minimum value for box width and height.
+
+    Returns:
+        (np.ndarray | torch.Tensor): Normalized bounding box coordinates in (x, y, width, height) format.
+    """
+    if clip:
+        x = clip_boxes(x, (h - eps, w - eps))
+    assert x.shape[-1] == 4, f"input shape last dimension expected 4 but input shape is {x.shape}"
+    y = empty_like(x)  # faster than clone/copy
+    y[..., 0] = ((x[..., 0] + x[..., 2]) / 2) / w  # x center
+    y[..., 1] = ((x[..., 1] + x[..., 3]) / 2) / h  # y center
+    y[..., 2] = (x[..., 2] - x[..., 0]) / w  # width
+    y[..., 3] = (x[..., 3] - x[..., 1]) / h  # height
+    return y
+
+
+def xywh2ltwh(x):
+    """
+    Convert bounding box format from [x, y, w, h] to [x1, y1, w, h] where x1, y1 are top-left coordinates.
+
+    Args:
+        x (np.ndarray | torch.Tensor): Input bounding box coordinates in xywh format.
+
+    Returns:
+        (np.ndarray | torch.Tensor): Bounding box coordinates in xyltwh format.
+    """
+    y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
+    y[..., 0] = x[..., 0] - x[..., 2] / 2  # top left x
+    y[..., 1] = x[..., 1] - x[..., 3] / 2  # top left y
+    return y
+
+
+def xyxy2ltwh(x):
+    """
+    Convert bounding boxes from [x1, y1, x2, y2] to [x1, y1, w, h] format.
+
+    Args:
+        x (np.ndarray | torch.Tensor): Input bounding box coordinates in xyxy format.
+
+    Returns:
+        (np.ndarray | torch.Tensor): Bounding box coordinates in xyltwh format.
+    """
+    y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
+    y[..., 2] = x[..., 2] - x[..., 0]  # width
+    y[..., 3] = x[..., 3] - x[..., 1]  # height
+    return y
+
+
+def ltwh2xywh(x):
+    """
+    Convert bounding boxes from [x1, y1, w, h] to [x, y, w, h] where xy1=top-left, xy=center.
+
+    Args:
+        x (torch.Tensor): Input bounding box coordinates.
+
+    Returns:
+        (np.ndarray | torch.Tensor): Bounding box coordinates in xywh format.
+    """
+    y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
+    y[..., 0] = x[..., 0] + x[..., 2] / 2  # center x
+    y[..., 1] = x[..., 1] + x[..., 3] / 2  # center y
+    return y
+
+
+def xyxyxyxy2xywhr(x):
+    """
+    Convert batched Oriented Bounding Boxes (OBB) from [xy1, xy2, xy3, xy4] to [xywh, rotation] format.
+
+    Args:
+        x (numpy.ndarray | torch.Tensor): Input box corners with shape (N, 8) in [xy1, xy2, xy3, xy4] format.
+
+    Returns:
+        (numpy.ndarray | torch.Tensor): Converted data in [cx, cy, w, h, rotation] format with shape (N, 5).
+            Rotation values are in radians from 0 to pi/2.
+    """
+    is_torch = isinstance(x, torch.Tensor)
+    points = x.cpu().numpy() if is_torch else x
+    points = points.reshape(len(x), -1, 2)
+    rboxes = []
+    for pts in points:
+        # NOTE: Use cv2.minAreaRect to get accurate xywhr,
+        # especially some objects are cut off by augmentations in dataloader.
+        (cx, cy), (w, h), angle = cv2.minAreaRect(pts)
+        rboxes.append([cx, cy, w, h, angle / 180 * np.pi])
+    return torch.tensor(rboxes, device=x.device, dtype=x.dtype) if is_torch else np.asarray(rboxes)
+
+
+def xywhr2xyxyxyxy(x):
+    """
+    Convert batched Oriented Bounding Boxes (OBB) from [xywh, rotation] to [xy1, xy2, xy3, xy4] format.
+
+    Args:
+        x (numpy.ndarray | torch.Tensor): Boxes in [cx, cy, w, h, rotation] format with shape (N, 5) or (B, N, 5).
+            Rotation values should be in radians from 0 to pi/2.
+
+    Returns:
+        (numpy.ndarray | torch.Tensor): Converted corner points with shape (N, 4, 2) or (B, N, 4, 2).
+    """
+    cos, sin, cat, stack = (
+        (torch.cos, torch.sin, torch.cat, torch.stack)
+        if isinstance(x, torch.Tensor)
+        else (np.cos, np.sin, np.concatenate, np.stack)
+    )
+
+    ctr = x[..., :2]
+    w, h, angle = (x[..., i : i + 1] for i in range(2, 5))
+    cos_value, sin_value = cos(angle), sin(angle)
+    vec1 = [w / 2 * cos_value, w / 2 * sin_value]
+    vec2 = [-h / 2 * sin_value, h / 2 * cos_value]
+    vec1 = cat(vec1, -1)
+    vec2 = cat(vec2, -1)
+    pt1 = ctr + vec1 + vec2
+    pt2 = ctr + vec1 - vec2
+    pt3 = ctr - vec1 - vec2
+    pt4 = ctr - vec1 + vec2
+    return stack([pt1, pt2, pt3, pt4], -2)
+
+
+def ltwh2xyxy(x):
+    """
+    Convert bounding box from [x1, y1, w, h] to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right.
+
+    Args:
+        x (np.ndarray | torch.Tensor): Input bounding box coordinates.
+
+    Returns:
+        (np.ndarray | torch.Tensor): Bounding box coordinates in xyxy format.
+    """
+    y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
+    y[..., 2] = x[..., 2] + x[..., 0]  # width
+    y[..., 3] = x[..., 3] + x[..., 1]  # height
+    return y
+
+
+def segments2boxes(segments):
+    """
+    Convert segment labels to box labels, i.e. (cls, xy1, xy2, ...) to (cls, xywh).
+
+    Args:
+        segments (list): List of segments where each segment is a list of points, each point is [x, y] coordinates.
+
+    Returns:
+        (np.ndarray): Bounding box coordinates in xywh format.
+    """
+    boxes = []
+    for s in segments:
+        x, y = s.T  # segment xy
+        boxes.append([x.min(), y.min(), x.max(), y.max()])  # cls, xyxy
+    return xyxy2xywh(np.array(boxes))  # cls, xywh
+
+
+def resample_segments(segments, n: int = 1000):
+    """
+    Resample segments to n points each using linear interpolation.
+
+    Args:
+        segments (list): List of (N, 2) arrays where N is the number of points in each segment.
+        n (int): Number of points to resample each segment to.
+
+    Returns:
+        (list): Resampled segments with n points each.
+    """
+    for i, s in enumerate(segments):
+        if len(s) == n:
+            continue
+        s = np.concatenate((s, s[0:1, :]), axis=0)
+        x = np.linspace(0, len(s) - 1, n - len(s) if len(s) < n else n)
+        xp = np.arange(len(s))
+        x = np.insert(x, np.searchsorted(x, xp), xp) if len(s) < n else x
+        segments[i] = (
+            np.concatenate([np.interp(x, xp, s[:, i]) for i in range(2)], dtype=np.float32).reshape(2, -1).T
+        )  # segment xy
+    return segments
+
+
+def crop_mask(masks, boxes):
+    """
+    Crop masks to bounding box regions.
+
+    Args:
+        masks (torch.Tensor): Masks with shape (N, H, W).
+        boxes (torch.Tensor): Bounding box coordinates with shape (N, 4) in relative point form.
+
+    Returns:
+        (torch.Tensor): Cropped masks.
+    """
+    _, h, w = masks.shape
+    x1, y1, x2, y2 = torch.chunk(boxes[:, :, None], 4, 1)  # x1 shape(n,1,1)
+    r = torch.arange(w, device=masks.device, dtype=x1.dtype)[None, None, :]  # rows shape(1,1,w)
+    c = torch.arange(h, device=masks.device, dtype=x1.dtype)[None, :, None]  # cols shape(1,h,1)
+
+    return masks * ((r >= x1) * (r < x2) * (c >= y1) * (c < y2))
+
+
+def process_mask(protos, masks_in, bboxes, shape, upsample: bool = False):
+    """
+    Apply masks to bounding boxes using mask head output.
+
+    Args:
+        protos (torch.Tensor): Mask prototypes with shape (mask_dim, mask_h, mask_w).
+        masks_in (torch.Tensor): Mask coefficients with shape (N, mask_dim) where N is number of masks after NMS.
+        bboxes (torch.Tensor): Bounding boxes with shape (N, 4) where N is number of masks after NMS.
+        shape (tuple): Input image size as (height, width).
+        upsample (bool): Whether to upsample masks to original image size.
+
+    Returns:
+        (torch.Tensor): A binary mask tensor of shape [n, h, w], where n is the number of masks after NMS, and h and w
+            are the height and width of the input image. The mask is applied to the bounding boxes.
+    """
+    c, mh, mw = protos.shape  # CHW
+    ih, iw = shape
+    masks = (masks_in @ protos.float().view(c, -1)).view(-1, mh, mw)  # CHW
+    width_ratio = mw / iw
+    height_ratio = mh / ih
+
+    downsampled_bboxes = bboxes.clone()
+    downsampled_bboxes[:, 0] *= width_ratio
+    downsampled_bboxes[:, 2] *= width_ratio
+    downsampled_bboxes[:, 3] *= height_ratio
+    downsampled_bboxes[:, 1] *= height_ratio
+
+    masks = crop_mask(masks, downsampled_bboxes)  # CHW
+    if upsample:
+        masks = F.interpolate(masks[None], shape, mode="bilinear", align_corners=False)[0]  # CHW
+    return masks.gt_(0.0)
+
+
+def process_mask_native(protos, masks_in, bboxes, shape):
+    """
+    Apply masks to bounding boxes using mask head output with native upsampling.
+
+    Args:
+        protos (torch.Tensor): Mask prototypes with shape (mask_dim, mask_h, mask_w).
+        masks_in (torch.Tensor): Mask coefficients with shape (N, mask_dim) where N is number of masks after NMS.
+        bboxes (torch.Tensor): Bounding boxes with shape (N, 4) where N is number of masks after NMS.
+        shape (tuple): Input image size as (height, width).
+
+    Returns:
+        (torch.Tensor): Binary mask tensor with shape (H, W, N).
+    """
+    c, mh, mw = protos.shape  # CHW
+    masks = (masks_in @ protos.float().view(c, -1)).view(-1, mh, mw)
+    masks = scale_masks(masks[None], shape)[0]  # CHW
+    masks = crop_mask(masks, bboxes)  # CHW
+    return masks.gt_(0.0)
+
+
+def scale_masks(masks, shape, padding: bool = True):
+    """
+    Rescale segment masks to target shape.
+
+    Args:
+        masks (torch.Tensor): Masks with shape (N, C, H, W).
+        shape (tuple): Target height and width as (height, width).
+        padding (bool): Whether masks are based on YOLO-style augmented images with padding.
+
+    Returns:
+        (torch.Tensor): Rescaled masks.
+    """
+    mh, mw = masks.shape[2:]
+    gain = min(mh / shape[0], mw / shape[1])  # gain  = old / new
+    pad = [mw - shape[1] * gain, mh - shape[0] * gain]  # wh padding
+    if padding:
+        pad[0] /= 2
+        pad[1] /= 2
+    top, left = (int(round(pad[1] - 0.1)), int(round(pad[0] - 0.1))) if padding else (0, 0)  # y, x
+    bottom, right = (
+        mh - int(round(pad[1] + 0.1)),
+        mw - int(round(pad[0] + 0.1)),
+    )
+    masks = masks[..., top:bottom, left:right]
+
+    masks = F.interpolate(masks, shape, mode="bilinear", align_corners=False)  # NCHW
+    return masks
+
+
+def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None, normalize: bool = False, padding: bool = True):
+    """
+    Rescale segment coordinates from img1_shape to img0_shape.
+
+    Args:
+        img1_shape (tuple): Shape of the source image.
+        coords (torch.Tensor): Coordinates to scale with shape (N, 2).
+        img0_shape (tuple): Shape of the target image.
+        ratio_pad (tuple, optional): Ratio and padding values as ((ratio_h, ratio_w), (pad_h, pad_w)).
+        normalize (bool): Whether to normalize coordinates to range [0, 1].
+        padding (bool): Whether coordinates are based on YOLO-style augmented images with padding.
+
+    Returns:
+        (torch.Tensor): Scaled coordinates.
+    """
+    if ratio_pad is None:  # calculate from img0_shape
+        gain = min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])  # gain  = old / new
+        pad = (img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2  # wh padding
+    else:
+        gain = ratio_pad[0][0]
+        pad = ratio_pad[1]
+
+    if padding:
+        coords[..., 0] -= pad[0]  # x padding
+        coords[..., 1] -= pad[1]  # y padding
+    coords[..., 0] /= gain
+    coords[..., 1] /= gain
+    coords = clip_coords(coords, img0_shape)
+    if normalize:
+        coords[..., 0] /= img0_shape[1]  # width
+        coords[..., 1] /= img0_shape[0]  # height
+    return coords
+
+
+def regularize_rboxes(rboxes):
+    """
+    Regularize rotated bounding boxes to range [0, pi/2].
+
+    Args:
+        rboxes (torch.Tensor): Input rotated boxes with shape (N, 5) in xywhr format.
+
+    Returns:
+        (torch.Tensor): Regularized rotated boxes.
+    """
+    x, y, w, h, t = rboxes.unbind(dim=-1)
+    # Swap edge if t >= pi/2 while not being symmetrically opposite
+    swap = t % math.pi >= math.pi / 2
+    w_ = torch.where(swap, h, w)
+    h_ = torch.where(swap, w, h)
+    t = t % (math.pi / 2)
+    return torch.stack([x, y, w_, h_, t], dim=-1)  # regularized boxes
+
+
+def convert_torch2numpy_batch(batch: torch.Tensor) -> np.ndarray:
+    """
+    Convert a batch of FP32 torch tensors to NumPy uint8 arrays, changing from BCHW to BHWC layout.
+
+    Args:
+        batch (torch.Tensor): Input tensor batch with shape (Batch, Channels, Height, Width) and dtype torch.float32.
+
+    Returns:
+        (np.ndarray): Output NumPy array batch with shape (Batch, Height, Width, Channels) and dtype uint8.
+    """
+    return (batch.permute(0, 2, 3, 1).contiguous() * 255).clamp(0, 255).to(torch.uint8).cpu().numpy()
+
+
+def clean_str(s):
+    """
+    Clean a string by replacing special characters with '_' character.
+
+    Args:
+        s (str): A string needing special characters replaced.
+
+    Returns:
+        (str): A string with special characters replaced by an underscore _.
+    """
+    return re.sub(pattern="[|@#!¡·$€%&()=?¿^*;:,¨´><+]", repl="_", string=s)
+
+
+def empty_like(x):
+    """Create empty torch.Tensor or np.ndarray with same shape as input and float32 dtype."""
+    return (
+        torch.empty_like(x, dtype=torch.float32) if isinstance(x, torch.Tensor) else np.empty_like(x, dtype=np.float32)
+    )
