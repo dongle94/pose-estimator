@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 import copy
@@ -16,7 +17,7 @@ from core.yolo import YOLO
 from core.yolo.util.torch_utils import select_device
 from core.yolo.util.checks import check_imgsz
 from core.yolo.util.ops import non_max_suppression, scale_boxes
-from core.yolo.nn.tasks import attempt_load_weights
+from core.yolo.nn.tasks import attempt_load_one_weight
 from core.yolo.data.augment import LetterBox
 from utils.logger import get_logger
 
@@ -36,7 +37,8 @@ class YoloTorch(YOLO):
             self.fp16 = False
             self.logger.info(f"{kwargs['model_type']} pytorch will not use fp16. It will apply fp32 precision.")
 
-        model = attempt_load_weights(weight, device=self.device, inplace=True, fuse=fuse)
+        self.logger.info(f"Model load: {os.path.abspath(weight)}")
+        model, weight = attempt_load_one_weight(weight, device=self.device, inplace=True, fuse=fuse)
         self.model = model.half() if self.fp16 else model.float()
         self.model.eval()
         self.stride = max(int(model.stride.max()), 32)
