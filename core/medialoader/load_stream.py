@@ -3,6 +3,7 @@ import math
 import time
 import numpy as np
 import platform
+import threading
 from threading import Thread
 
 from core.medialoader import LoadSample
@@ -13,8 +14,8 @@ class LoadStream(LoadSample):
         super().__init__()
 
         self.logger = logger
-        self.stride = stride
         self.bgr = bgr
+        self.stride = stride
         source = eval(source) if source.isnumeric() else source
 
         if platform.system() == 'Windows':
@@ -44,11 +45,13 @@ class LoadStream(LoadSample):
             cap.set(cv2.CAP_PROP_SETTINGS, 0)
 
         if self.logger is not None:
-            self.logger.info(f"-- Load Stream: {self.w}*{self.h}, FPS: {self.fps} --")
+            self.logger.info(f"-- Load {self.mode.title()}: {self.w}x{self.h}, FPS: {self.fps} --")
         else:
-            print(f"-- Load Stream: {self.w}*{self.h}, FPS: {self.fps} --")
+            print(f"-- Load {self.mode.title()}: {self.w}x{self.h}, FPS: {self.fps} --")
 
+        self.cap = cap
         _, self.img = cap.read()
+        self.img_lock = threading.Lock()
         self.thread = Thread(target=self.update, args=(cap, source,), daemon=True)
         self.thread.start()
 
@@ -56,33 +59,52 @@ class LoadStream(LoadSample):
         n, f = 0, self.frame
         while cap.isOpened() and n < f:
             n += 1
+            success = cap.grab()
+            if not success:
+                time.sleep(0.1)
+                continue
 
-            cap.grab()
             if n % self.stride == 0:
                 success, im = cap.retrieve()
-                if success:
-                    self.img = im
-                else:
-                    self.img = np.zeros_like(self.img)
-                    cap.open(stream)
-            time.sleep(0.0)  # wait time
+                with self.img_lock:
+                    if success:
+                        self.img = im
+                    else:
+                        cap.release()
+                        if platform.system() == 'Windows':
+                            self.cap = cap = cv2.VideoCapture(stream, cv2.CAP_DSHOW)
+                        else:
+                            self.cap = cap = cv2.VideoCapture(stream)
+                        time.sleep(0.1)
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        if not self.thread.is_alive() or cv2.waitKey(1) == ord('q'):
+        if cv2.waitKey(1) == ord('q'):
             cv2.destroyAllWindows()
-            raise StopIteration
+            return None
 
-        im = self.img.copy()
+        with self.img_lock:
+            if self.img is None:
+                return None
+            im = self.img.copy()
+
         if self.bgr is False:       # rgb
             im = im[..., ::-1]
 
         return im
 
     def __len__(self):
-        pass
+        return float('inf')
+    
+    def __del__(self):
+        if hasattr(self, 'thread') and self.thread.is_alive():
+            # 스레드 종료 대기
+            self.thread.join(timeout=1.0)
+        if hasattr(self, 'cap') and self.cap:
+            self.cap.release()
+        cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

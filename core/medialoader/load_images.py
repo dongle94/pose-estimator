@@ -7,9 +7,10 @@ IMG_FORMATS = 'bmp', 'dng', 'jpeg', 'jpg', 'mpo', 'png', 'tif', 'tiff', 'webp', 
 
 
 class LoadImages(LoadSample):
-    def __init__(self, path, bgr=True):
+    def __init__(self, path, bgr=True, logger=None):
         super().__init__()
 
+        self.logger = logger        
         self.bgr = bgr
 
         files = []
@@ -29,30 +30,45 @@ class LoadImages(LoadSample):
         ni = len(images)
 
         self.mode = 'image'
-        self.w, self.h = -1, -1
-        self.fps = -1
+
+        self.w = None
+        self.h = None
+        self.fps = None
         self.files = images
         self.num_files = ni
         self.count = 0
+
+        if self.logger is not None:
+            self.logger.info(f"-- Load {self.mode.title()}: {self.w}x{self.h}, FPS: {self.fps} --")
+        else:
+            print(f"-- Load {self.mode.title()}: {self.w}x{self.h}, FPS: {self.fps} --")
 
     def __iter__(self):
         self.count = 0
         return self
 
     def __next__(self):
-        if self.count == self.num_files:
-            raise StopIteration
+        while self.count < self.num_files:
+            if self.count == self.num_files:
+                return None
 
-        path = self.files[self.count]
+            path = self.files[self.count]
+            self.count += 1
 
-        self.count += 1
-        im = cv2.imread(path)
-        assert im is not None, f'Image Not Found {path}'
-        self.h, self.w = im.shape[:2]
-        if self.bgr is False:
-            im = im[..., ::-1]
+            im = cv2.imread(path)
+            if im is None:
+                if self.logger is not None:
+                    self.logger.warning(f'Image Not Found {path}')
+                else:
+                    print(f'Warning: Image Not Found {path}')
+                continue
 
-        return im
+            self.h, self.w = im.shape[:2]
+            if self.bgr is False:
+                im = im[..., ::-1]
+            return im
+        
+        return None
 
     def __len__(self):
         return self.num_files  # number of files
