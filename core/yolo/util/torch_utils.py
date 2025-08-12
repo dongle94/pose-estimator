@@ -1,7 +1,11 @@
+import functools
 import math
 import os
+import time
 import platform
 from contextlib import contextmanager
+from copy import deepcopy
+from pathlib import Path
 
 import torch
 import torch.distributed as dist
@@ -9,24 +13,62 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from core.yolo import __version__
+from core.yolo.util import (
+    NUM_THREADS,
+    PYTHON_VERSION,
+)
 from core.yolo.util.checks import check_version
 
-
+# Version checks (all default to version>=min_version)
 TORCH_1_9 = check_version(torch.__version__, "1.9.0")
 TORCH_2_0 = check_version(torch.__version__, "2.0.0")
 
 
 @contextmanager
 def torch_distributed_zero_first(local_rank: int):
-    """Ensures all processes in distributed training wait for the local master (rank 0) to complete a task first."""
+    """Ensure all processes in distributed training wait for the local master (rank 0) to complete a task first."""
     initialized = dist.is_available() and dist.is_initialized()
+    use_ids = initialized and dist.get_backend() == "nccl"
+
     if initialized and local_rank not in {-1, 0}:
-        dist.barrier(device_ids=[local_rank])
+        dist.barrier(device_ids=[local_rank]) if use_ids else dist.barrier()
     yield
     if initialized and local_rank == 0:
-        dist.barrier(device_ids=[0])
+        dist.barrier(device_ids=[local_rank]) if use_ids else dist.barrier()
 
 
+def smart_inference_mode():
+    """Apply torch.inference_mode() decorator if torch>=1.9.0 else torch.no_grad() decorator."""
+
+    def decorate(fn):
+        """Apply appropriate torch decorator for inference mode based on torch version."""
+        if TORCH_1_9 and torch.is_inference_mode_enabled():
+            return fn  # already in inference_mode, act as a pass-through
+        else:
+            return (torch.inference_mode if TORCH_1_9 else torch.no_grad)()(fn)
+
+    return decorate
+
+
+@functools.lru_cache
+def get_cpu_info():
+    """Return a string with system CPU information, i.e. 'Apple M2'."""
+    from core.yolo.util import PERSISTENT_CACHE  # avoid circular import error
+
+    if "cpu_info" not in PERSISTENT_CACHE:
+        try:
+            import cpuinfo  # pip install py-cpuinfo
+
+            k = "brand_raw", "hardware_raw", "arch_string_raw"  # keys sorted by preference
+            info = cpuinfo.get_cpu_info()  # info dict
+            string = info.get(k[0] if k[0] in info else k[1] if k[1] in info else k[2], "unknown")
+            PERSISTENT_CACHE["cpu_info"] = string.replace("(R)", "").replace("CPU ", "").replace("@ ", "")
+        except Exception:
+            pass
+    return PERSISTENT_CACHE.get("cpu_info", "unknown")
+
+
+@functools.lru_cache
 def get_gpu_info(index):
     """Return a string with system GPU information, i.e. 'Tesla T4, 15102MiB'."""
     properties = torch.cuda.get_device_properties(index)
@@ -132,8 +174,15 @@ def select_device(device="", gpu_num=0, logger=None):
     return torch.device(arg)
 
 
+def time_sync():
+    """Return PyTorch-accurate time."""
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    return time.time()
+
+
 def fuse_conv_and_bn(conv, bn):
-    """Fuse Conv2d() and BatchNorm2d() layers https://tehnokv.com/posts/fusing-batchnorm-and-conv/."""
+    """Fuse Conv2d() and BatchNorm2d() layers."""
     fusedconv = (
         nn.Conv2d(
             conv.in_channels,
@@ -150,12 +199,16 @@ def fuse_conv_and_bn(conv, bn):
     )
 
     # Prepare filters
-    w_conv = conv.weight.clone().view(conv.out_channels, -1)
+    w_conv = conv.weight.view(conv.out_channels, -1)
     w_bn = torch.diag(bn.weight.div(torch.sqrt(bn.eps + bn.running_var)))
     fusedconv.weight.copy_(torch.mm(w_bn, w_conv).view(fusedconv.weight.shape))
 
     # Prepare spatial bias
-    b_conv = torch.zeros(conv.weight.shape[0], device=conv.weight.device) if conv.bias is None else conv.bias
+    b_conv = (
+        torch.zeros(conv.weight.shape[0], dtype=conv.weight.dtype, device=conv.weight.device)
+        if conv.bias is None
+        else conv.bias
+    )
     b_bn = bn.bias - bn.weight.mul(bn.running_mean).div(torch.sqrt(bn.running_var + bn.eps))
     fusedconv.bias.copy_(torch.mm(w_bn, b_conv.reshape(-1, 1)).reshape(-1) + b_bn)
 
@@ -193,6 +246,103 @@ def fuse_deconv_and_bn(deconv, bn):
     return fuseddconv
 
 
+def model_info(model, detailed=False, verbose=True, imgsz=640):
+    """
+    Print and return detailed model information layer by layer.
+
+    Args:
+        model (nn.Module): Model to analyze.
+        detailed (bool, optional): Whether to print detailed layer information.
+        verbose (bool, optional): Whether to print model information.
+        imgsz (int | list, optional): Input image size.
+
+    Returns:
+        n_l (int): Number of layers.
+        n_p (int): Number of parameters.
+        n_g (int): Number of gradients.
+        flops (float): GFLOPs.
+    """
+    if not verbose:
+        return
+    n_p = get_num_params(model)  # number of parameters
+    n_g = get_num_gradients(model)  # number of gradients
+    layers = __import__("collections").OrderedDict((n, m) for n, m in model.named_modules() if len(m._modules) == 0)
+    n_l = len(layers)  # number of layers
+    if detailed:
+        h = f"{'layer':>5}{'name':>40}{'type':>20}{'gradient':>10}{'parameters':>12}{'shape':>20}{'mu':>10}{'sigma':>10}"
+        print("Info: ", h)
+        for i, (mn, m) in enumerate(layers.items()):
+            mn = mn.replace("module_list.", "")
+            mt = m.__class__.__name__
+            if len(m._parameters):
+                for pn, p in m.named_parameters():
+                    print(
+                        f"Info: {i:>5g}{f'{mn}.{pn}':>40}{mt:>20}{p.requires_grad!r:>10}{p.numel():>12g}{str(list(p.shape)):>20}{p.mean():>10.3g}{p.std():>10.3g}{str(p.dtype).replace('torch.', ''):>15}"
+                    )
+            else:  # layers with no learnable params
+                print(f"Info: {i:>5g}{mn:>40}{mt:>20}{False!r:>10}{0:>12g}{str([]):>20}{'-':>10}{'-':>10}{'-':>15}")
+
+    flops = get_flops(model, imgsz)  # imgsz may be int or list, i.e. imgsz=640 or imgsz=[640, 320]
+    fused = " (fused)" if getattr(model, "is_fused", lambda: False)() else ""
+    fs = f", {flops:.1f} GFLOPs" if flops else ""
+    yaml_file = getattr(model, "yaml_file", "") or getattr(model, "yaml", {}).get("yaml_file", "")
+    model_name = Path(yaml_file).stem.replace("yolo", "YOLO") or "Model"
+    print(f"Info: {model_name} summary{fused}: {n_l:,} layers, {n_p:,} parameters, {n_g:,} gradients{fs}")
+    return n_l, n_p, n_g, flops
+
+
+def get_num_params(model):
+    """Return the total number of parameters in a YOLO model."""
+    return sum(x.numel() for x in model.parameters())
+
+
+def get_num_gradients(model):
+    """Return the total number of parameters with gradients in a YOLO model."""
+    return sum(x.numel() for x in model.parameters() if x.requires_grad)
+
+
+def get_flops(model, imgsz=640):
+    """
+    Calculate FLOPs (floating point operations) for a model in billions.
+
+    Attempts two calculation methods: first with a stride-based tensor for efficiency,
+    then falls back to full image size if needed (e.g., for RTDETR models). Returns 0.0
+    if thop library is unavailable or calculation fails.
+
+    Args:
+        model (nn.Module): The model to calculate FLOPs for.
+        imgsz (int | list, optional): Input image size.
+
+    Returns:
+        (float): The model FLOPs in billions.
+    """
+    try:
+        import thop
+    except ImportError:
+        thop = None  # conda support without 'ultralytics-thop' installed
+
+    if not thop:
+        return 0.0  # if not installed return 0.0 GFLOPs
+
+    try:
+        model = de_parallel(model)
+        p = next(model.parameters())
+        if not isinstance(imgsz, list):
+            imgsz = [imgsz, imgsz]  # expand if int/float
+        try:
+            # Method 1: Use stride-based input tensor
+            stride = max(int(model.stride.max()), 32) if hasattr(model, "stride") else 32  # max stride
+            im = torch.empty((1, p.shape[1], stride, stride), device=p.device)  # input image in BCHW format
+            flops = thop.profile(deepcopy(model), inputs=[im], verbose=False)[0] / 1e9 * 2  # stride GFLOPs
+            return flops * imgsz[0] / stride * imgsz[1] / stride  # imgsz GFLOPs
+        except Exception:
+            # Method 2: Use actual image size (required for RTDETR models)
+            im = torch.empty((1, p.shape[1], *imgsz), device=p.device)  # input image in BCHW format
+            return thop.profile(deepcopy(model), inputs=[im], verbose=False)[0] / 1e9 * 2  # imgsz GFLOPs
+    except Exception:
+        return 0.0
+
+
 def initialize_weights(model):
     """Initialize model weights to random values."""
     for m in model.modules():
@@ -207,8 +357,17 @@ def initialize_weights(model):
 
 
 def scale_img(img, ratio=1.0, same_shape=False, gs=32):
-    """Scales and pads an image tensor of shape img(bs,3,y,x) based on given ratio and grid size gs, optionally
-    retaining the original shape.
+    """
+    Scale and pad an image tensor, optionally maintaining aspect ratio and padding to gs multiple.
+
+    Args:
+        img (torch.Tensor): Input image tensor.
+        ratio (float, optional): Scaling ratio.
+        same_shape (bool, optional): Whether to maintain the same shape.
+        gs (int, optional): Grid size for padding.
+
+    Returns:
+        (torch.Tensor): Scaled and padded image tensor.
     """
     if ratio == 1.0:
         return img
@@ -220,8 +379,42 @@ def scale_img(img, ratio=1.0, same_shape=False, gs=32):
     return F.pad(img, [0, w - s[1], 0, h - s[0]], value=0.447)  # value = imagenet mean
 
 
-def make_divisible(x, divisor):
-    """Returns nearest x divisible by divisor."""
-    if isinstance(divisor, torch.Tensor):
-        divisor = int(divisor.max())  # to int
-    return math.ceil(x / divisor) * divisor
+def intersect_dicts(da, db, exclude=()):
+    """
+    Return a dictionary of intersecting keys with matching shapes, excluding 'exclude' keys, using da values.
+
+    Args:
+        da (dict): First dictionary.
+        db (dict): Second dictionary.
+        exclude (tuple, optional): Keys to exclude.
+
+    Returns:
+        (dict): Dictionary of intersecting keys with matching shapes.
+    """
+    return {k: v for k, v in da.items() if k in db and all(x not in k for x in exclude) and v.shape == db[k].shape}
+
+
+def is_parallel(model):
+    """
+    Return True if model is of type DP or DDP.
+
+    Args:
+        model (nn.Module): Model to check.
+
+    Returns:
+        (bool): True if model is DataParallel or DistributedDataParallel.
+    """
+    return isinstance(model, (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel))
+
+
+def de_parallel(model):
+    """
+    De-parallelize a model: return single-GPU model if model is of type DP or DDP.
+
+    Args:
+        model (nn.Module): Model to de-parallelize.
+
+    Returns:
+        (nn.Module): De-parallelized model.
+    """
+    return model.module if is_parallel(model) else model
