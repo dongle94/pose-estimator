@@ -8,7 +8,6 @@ FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
-os.chdir(ROOT)
 
 from utils.logger import get_logger
 
@@ -23,6 +22,9 @@ class PoseEstimator(object):
             weight = os.path.abspath(os.path.join(ROOT, cfg.kept_model_path))
         else:
             weight = os.path.abspath(cfg.kept_model_path)
+        
+        if not os.path.exists(weight):
+            raise FileNotFoundError(f"Weight file not found: {weight}")
         self.estimator_type = cfg.kept_model_type.lower()
 
         self.framework = None
@@ -35,7 +37,7 @@ class PoseEstimator(object):
 
         if self.estimator_type == "hrnet":
             channel = cfg.hrnet_channel
-            ext = os.path.splitext(weight)[1]
+            ext = os.path.splitext(weight)[1].lower()
             if ext in [".pt", ".pth"]:
                 from core.hrnet_pose.hrnet_pose_pt import PoseHRNetTorch
                 model = PoseHRNetTorch
@@ -61,7 +63,7 @@ class PoseEstimator(object):
                 model_type=self.estimator_type
             )
         elif self.estimator_type == "rtmpose":
-            ext = os.path.splitext(weight)[1]
+            ext = os.path.splitext(weight)[1].lower()
             if ext in [".onnx"]:
                 from core.rtmpose.rtmpose_ort import RMTPoseORT
                 model = RMTPoseORT
@@ -83,7 +85,7 @@ class PoseEstimator(object):
             )
         elif self.estimator_type == 'vitpose':
             model_name = cfg.vitpose_name
-            ext = os.path.splitext(weight)[1]
+            ext = os.path.splitext(weight)[1].lower()
             if ext in [".pt", ".pth"]:
                 from core.vitpose.vitpose_pt import ViTPoseTorch
                 model = ViTPoseTorch
@@ -135,6 +137,7 @@ class PoseEstimator(object):
             kept_pred, raw_heatmaps = self.estimator.postprocess(
                 preds=kept_pred, centers=np.asarray(centers), scales=np.asarray(scales)
             )
+            kept_pred = np.array(kept_pred)
 
             t3 = self.estimator.get_time()
         elif self.estimator_type in ['vitpose']:
@@ -171,6 +174,7 @@ class PoseEstimator(object):
 
 
 if __name__ == "__main__":
+    os.chdir(ROOT)
     import cv2
     import time
     from core.obj_detector import ObjectDetector
