@@ -111,7 +111,7 @@ class ViTPoseTorch(ViTPoseBase):
         batch_heatmaps = preds.float().cpu().detach().numpy()
 
         frame_kpts = []
-        for pred, (orig_w, orig_h), (l_pad, t_pad), bbox in zip(batch_heatmaps, pads, orig_wh, bboxes):
+        for pred, (orig_w, orig_h), (l_pad, t_pad), bbox in zip(batch_heatmaps, orig_wh, pads, bboxes):
             points, prob = keypoints_from_heatmaps(heatmaps=np.expand_dims(pred, axis=0),
                                                    center=np.array([[orig_w // 2,
                                                                      orig_h // 2]]),
@@ -162,11 +162,12 @@ if __name__ == "__main__":
 
     _input_img = _img.copy()
     t2 = _estimator.get_time()
-    _kept_inputs, _pads, _orig_wh, _bboxes = _estimator.preprocess(_input_img, _det)
+    _kept_inputs, _orig_wh, _pads, _bboxes = _estimator.preprocess(_input_img, _det)
     t3 = _estimator.get_time()
     _kept_pred = _estimator.infer(_kept_inputs)
     t4 = _estimator.get_time()
     _kept_pred = _estimator.postprocess(_kept_pred, _orig_wh, _pads, _bboxes)
+    print(_kept_pred)
     t5 = _estimator.get_time()
 
     for d in _det:
