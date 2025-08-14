@@ -142,7 +142,7 @@ class PoseEstimator(object):
             t3 = self.estimator.get_time()
         elif self.estimator_type in ['vitpose']:
             t0 = self.estimator.get_time()
-            inp, pads, orig_wh, bboxes = self.estimator.preprocess(img, boxes)
+            inp, orig_wh, pads, bboxes = self.estimator.preprocess(img, boxes)
 
             t1 = self.estimator.get_time()
             kept_pred = self.estimator.infer(inp)

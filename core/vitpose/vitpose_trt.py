@@ -143,7 +143,7 @@ class ViTPoseTRT(ViTPoseBase):
 
     def postprocess(self, preds, orig_wh, pads, bboxes):
         frame_kpts = []
-        for pred, (orig_w, orig_h), (l_pad, t_pad), bbox in zip(preds, pads, orig_wh, bboxes):
+        for pred, (orig_w, orig_h), (l_pad, t_pad), bbox in zip(preds, orig_wh, pads, bboxes):
             points, prob = keypoints_from_heatmaps(heatmaps=np.expand_dims(pred, axis=0).astype(np.float32),
                                                    center=np.array([[orig_w // 2,
                                                                      orig_h // 2]]),
