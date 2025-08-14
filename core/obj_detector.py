@@ -26,7 +26,7 @@ class ObjectDetector(object):
 
         self.framework = None
 
-        if self.detector_type in ["yolov5", "yolov8", "yolov10", "yolov11"]:
+        if self.detector_type in ["yolov5", "yolov8", "yolov10", "yolov11", "yolov12"]:
             img_size = cfg.yolo_img_size
             iou_thres = cfg.yolo_nms_iou
             agnostic = cfg.yolo_agnostic_nms
@@ -77,7 +77,7 @@ class ObjectDetector(object):
         self.ts = [0., 0., 0.]
 
     def run(self, img):
-        if self.detector_type in ["yolov5", "yolov8", "yolov10", "yolov11"]:
+        if self.detector_type in ["yolov5", "yolov8", "yolov10", "yolov11", "yolov12"]:
             t0 = self.detector.get_time()
 
             img, orig_img = self.detector.preprocess(img)
@@ -149,8 +149,8 @@ if __name__ == "__main__":
             x1, y1, x2, y2 = map(int, d[:4])
             cls = int(d[5])
             cv2.rectangle(frame, (x1, y1), (x2, y2), (96, 96, 216), thickness=2, lineType=cv2.LINE_AA)
-            cv2.putText(frame, str(_detector.names[cls]), (x1, y1+20), cv2.FONT_HERSHEY_SIMPLEX, 1,
-                        (96, 96, 96), thickness=1, lineType=cv2.LINE_AA)
+            cv2.putText(frame, str(_detector.names[cls])+f": {d[4]:.2f}", (x1, y1+20), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                        (0, 0, 255), thickness=1, lineType=cv2.LINE_AA)
 
         et = time.time()
         if media_loader.is_imgs:
